@@ -1,0 +1,32 @@
+import { Module } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
+import { databaseProviders } from './db/database.providers';
+import { EVENT_STORE } from './event-store/event-store.interface';
+import { InMemoryEventStore } from './event-store/in-memory-event-store';
+import { PostgresEventStore } from './event-store/postgres-event-store';
+import { KafkaClient } from './messaging/kafka.client';
+import { ProjectionRunnerService } from './projections/projection-runner.service';
+
+@Module({
+  providers: [
+    ...databaseProviders,
+    InMemoryEventStore,
+    PostgresEventStore,
+    KafkaClient,
+    ProjectionRunnerService,
+    {
+      provide: EVENT_STORE,
+      inject: [ConfigService, InMemoryEventStore, PostgresEventStore],
+      useFactory: (
+        configService: ConfigService,
+        inMemoryStore: InMemoryEventStore,
+        postgresStore: PostgresEventStore,
+      ) => {
+        const storeKind = configService.get<string>('EVENT_STORE_KIND', 'in-memory');
+        return storeKind === 'postgres' ? postgresStore : inMemoryStore;
+      },
+    },
+  ],
+  exports: [EVENT_STORE, KafkaClient, ProjectionRunnerService],
+})
+export class InfrastructureModule {}
