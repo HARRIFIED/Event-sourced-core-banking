@@ -12,8 +12,13 @@ export class PostgresEventStore implements EventStore, OnModuleDestroy {
     try {
       await client.query('BEGIN');
 
+      // Serialize writers per stream inside the transaction.
+      // This avoids invalid SQL patterns like FOR UPDATE with aggregate functions
+      // while still providing safe optimistic concurrency checks.
+      await client.query('SELECT pg_advisory_xact_lock(hashtext($1))', [streamId]);
+
       const versionResult = await client.query<{ version: number }>(
-        `SELECT COALESCE(MAX(stream_version), 0) as version FROM events WHERE stream_id = $1 FOR UPDATE`,
+        `SELECT COALESCE(MAX(stream_version), 0) as version FROM events WHERE stream_id = $1`,
         [streamId],
       );
 
