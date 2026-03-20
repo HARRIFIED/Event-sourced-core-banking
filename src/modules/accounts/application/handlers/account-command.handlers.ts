@@ -10,9 +10,14 @@ export class CreateAccountHandler implements ICommandHandler<CreateAccountComman
   constructor(private readonly repository: AccountRepository) {}
 
   async execute(command: CreateAccountCommand): Promise<void> {
-    const account = await this.repository.getById(command.accountId);
-    account.create(command.accountId, command.ownerId, command.currency, command.context);
-    await this.repository.save(command.accountId, account);
+    try {
+      const account = await this.repository.getById(command.accountId);
+      account.create(command.accountId, command.ownerId, command.currency, command.context);
+      await this.repository.save(command.accountId, account);
+    } catch (error) {
+      // Handle error appropriately
+      throw error;
+    }
   }
 }
 
@@ -21,14 +26,19 @@ export class DepositMoneyHandler implements ICommandHandler<DepositMoneyCommand,
   constructor(private readonly repository: AccountRepository) {}
 
   async execute(command: DepositMoneyCommand): Promise<void> {
-    const account = await this.repository.getById(command.accountId);
-    account.deposit(
-      command.amount,
-      command.currency,
-      command.transactionId,
-      command.context,
-    );
-    await this.repository.save(command.accountId, account);
+    try {
+      const account = await this.repository.getById(command.accountId);
+      account.deposit(
+        command.amount,
+        command.currency,
+        command.transactionId,
+        command.context,
+      );
+      await this.repository.save(command.accountId, account);
+    } catch (error) {
+      // Handle error appropriately
+      throw error;
+    }
   }
 }
 
@@ -37,14 +47,19 @@ export class WithdrawMoneyHandler implements ICommandHandler<WithdrawMoneyComman
   constructor(private readonly repository: AccountRepository) {}
 
   async execute(command: WithdrawMoneyCommand): Promise<void> {
-    const account = await this.repository.getById(command.accountId);
-    account.withdraw(
-      command.amount,
-      command.currency,
-      command.transactionId,
-      command.context,
-    );
-    await this.repository.save(command.accountId, account);
+    try {
+      const account = await this.repository.getById(command.accountId);
+      account.withdraw(
+        command.amount,
+        command.currency,
+        command.transactionId,
+        command.context,
+      );
+      await this.repository.save(command.accountId, account);
+    } catch (error) {
+      // Handle error appropriately
+      throw error;
+    }
   }
 }
 
@@ -53,9 +68,14 @@ export class FreezeAccountHandler implements ICommandHandler<FreezeAccountComman
   constructor(private readonly repository: AccountRepository) {}
 
   async execute(command: FreezeAccountCommand): Promise<void> {
+    try {
     const account = await this.repository.getById(command.accountId);
     account.freeze(command.reason, command.context);
     await this.repository.save(command.accountId, account);
+    } catch (error) {
+      // Handle error appropriately
+      throw error;
+    }
   }
 }
 

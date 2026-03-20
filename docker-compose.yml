@@ -19,6 +19,8 @@ services:
       KAFKA_CLIENT_ID: core-banking-app
     ports:
       - '3000:3000'
+    networks:
+      - internal
 
   postgres:
     image: postgres:16-alpine
@@ -32,6 +34,8 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./scripts/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - internal
 
   zookeeper:
     image: confluentinc/cp-zookeeper:7.6.1
@@ -41,6 +45,8 @@ services:
       ZOOKEEPER_TICK_TIME: 2000
     ports:
       - '2181:2181'
+    networks:
+      - internal
 
   kafka:
     image: confluentinc/cp-kafka:7.6.1
@@ -58,6 +64,13 @@ services:
       KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092,PLAINTEXT_HOST://localhost:29092
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+    
+    networks:
+      - internal
 
 volumes:
   postgres_data:
+
+networks:
+  internal:
+    driver: bridge

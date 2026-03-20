@@ -9,6 +9,7 @@ export class AccountRepository {
   async getById(accountId: string): Promise<AccountAggregate> {
     const aggregate = new AccountAggregate();
     const events = await this.eventStore.readStream(`account-${accountId}`);
+    //replay events to restore aggregate state (begin hydration with the events gotten from the event store)
     aggregate.loadFromHistory(events);
     return aggregate;
   }
@@ -19,6 +20,7 @@ export class AccountRepository {
       return;
     }
 
+    //add versioning to the event store append call to ensure optimistic concurrency control
     await this.eventStore.append(`account-${accountId}`, events, {
       expectedVersion: aggregate.version - events.length,
     });
