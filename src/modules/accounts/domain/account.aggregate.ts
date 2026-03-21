@@ -4,7 +4,15 @@ import { CommandContext } from '../../../common/cqrs/command-context';
 import { DomainEvent } from '../../../common/domain/domain-event';
 import { AccountEventTypes } from '../application/events/account.events';
 
+export interface AccountSnapshotState {
+  accountId: string;
+  ownerId: string;
+  currency: string;
+  status: 'ACTIVE' | 'FROZEN';
+  balance: number;
+}
 export class AccountAggregate extends AggregateRoot {
+  //current account state
   accountId!: string;
   ownerId!: string;
   currency!: string;
@@ -69,6 +77,25 @@ export class AccountAggregate extends AggregateRoot {
     );
   }
 
+  getSnapshotState(): AccountSnapshotState {
+    return {
+      accountId: this.accountId,
+      ownerId: this.ownerId,
+      currency: this.currency,
+      status: this.status,
+      balance: this.balance,
+    };
+  }
+
+  restoreSnapshot(state: AccountSnapshotState, version: number): void {
+    this.accountId = state.accountId;
+    this.ownerId = state.ownerId;
+    this.currency = state.currency;
+    this.status = state.status;
+    this.balance = state.balance;
+    this.version = version;
+  }
+  
   protected when(event: DomainEvent): void {
     this.version = event.streamVersion;
 
