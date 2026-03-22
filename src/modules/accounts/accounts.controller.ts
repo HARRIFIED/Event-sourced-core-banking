@@ -1,6 +1,12 @@
-import { Body, Controller, Param, Post } from '@nestjs/common';
+import { Body, Controller, DefaultValuePipe, Get, Inject, NotFoundException, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
 import { randomUUID } from 'crypto';
+import {
+  ACCOUNT_READ_MODEL_REPOSITORY,
+  AccountReadModelRepository,
+  AccountStatementEntryReadModel,
+  AccountSummaryReadModel,
+} from './query/account-read-model.repository';
 import {
   CreateAccountDto,
   DepositMoneyDto,
@@ -14,7 +20,11 @@ import { FreezeAccountCommand } from './application/commands/freeze-account.comm
 
 @Controller('accounts')
 export class AccountsController {
-  constructor(private readonly commandBus: CommandBus) {}
+  constructor(
+    private readonly commandBus: CommandBus,
+    @Inject(ACCOUNT_READ_MODEL_REPOSITORY)
+    private readonly readModels: AccountReadModelRepository,
+  ) {}
 
   @Post()
   async createAccount(@Body() dto: CreateAccountDto): Promise<{ status: string }> {
@@ -75,5 +85,54 @@ export class AccountsController {
     );
 
     return { status: 'accepted' };
+  }
+
+  @Get(':accountId')
+  async getAccountDetails(@Param('accountId') accountId: string): Promise<AccountSummaryReadModel> {
+    const summary = await this.readModels.getAccountSummary(accountId);
+    if (!summary) {
+      throw new NotFoundException(`Account ${accountId} not found`);
+    }
+
+    return summary;
+  }
+
+  @Get(':accountId/balance')
+  async getAccountBalance(@Param('accountId') accountId: string): Promise<{
+    accountId: string;
+    balance: number;
+    currency: string;
+    status: 'ACTIVE' | 'FROZEN';
+    version: number;
+  }> {
+    const summary = await this.readModels.getAccountSummary(accountId);
+    if (!summary) {
+      throw new NotFoundException(`Account ${accountId} not found`);
+    }
+
+    return {
+      accountId: summary.accountId,
+      balance: summary.balance,
+      currency: summary.currency,
+      status: summary.status,
+      version: summary.version,
+    };
+  }
+
+  @Get(':accountId/history')
+  async getAccountHistory(
+    @Param('accountId') accountId: string,
+    @Query('limit', new DefaultValuePipe(100), ParseIntPipe) limit: number,
+    @Query('offset', new DefaultValuePipe(0), ParseIntPipe) offset: number,
+  ): Promise<{ accountId: string; entries: AccountStatementEntryReadModel[] }> {
+    const summary = await this.readModels.getAccountSummary(accountId);
+    if (!summary) {
+      throw new NotFoundException(`Account ${accountId} not found`);
+    }
+
+    return {
+      accountId,
+      entries: await this.readModels.getAccountStatement(accountId, limit, offset),
+    };
   }
 }

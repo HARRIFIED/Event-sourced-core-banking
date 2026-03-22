@@ -1,5 +1,6 @@
 {
   "name": "event-sourced-core-banking",
+  "author": "Harrison Ikpefua",
   "version": "0.1.0",
   "private": true,
   "description": "Event-sourced core banking / digital wallet foundation built with NestJS",
