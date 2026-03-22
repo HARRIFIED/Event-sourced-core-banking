@@ -3,6 +3,7 @@ import { AggregateRoot } from '../../../common/domain/aggregate-root';
 import { CommandContext } from '../../../common/cqrs/command-context';
 import { DomainEvent } from '../../../common/domain/domain-event';
 import { AccountEventTypes } from '../application/events/account.events';
+import { BadRequestException } from '@nestjs/common';
 
 export interface AccountSnapshotState {
   accountId: string;
@@ -22,7 +23,7 @@ export class AccountAggregate extends AggregateRoot {
 
   create(accountId: string, ownerId: string, currency: string, context: CommandContext): void {
     if (this.accountId) {
-      throw new Error('Account already exists');
+      throw new BadRequestException('Account already exists');
     }
 
     this.apply(
@@ -37,7 +38,7 @@ export class AccountAggregate extends AggregateRoot {
   deposit(amount: number, currency: string, transactionId: string, context: CommandContext): void {
     this.ensureActive();
     this.ensureCurrency(currency);
-    if (amount <= 0) throw new Error('Deposit amount must be positive');
+    if (amount <= 0) throw new BadRequestException('Deposit amount must be positive');
 
     this.apply(
       this.makeEvent(AccountEventTypes.MoneyDeposited, {
@@ -52,8 +53,8 @@ export class AccountAggregate extends AggregateRoot {
   withdraw(amount: number, currency: string, transactionId: string, context: CommandContext): void {
     this.ensureActive();
     this.ensureCurrency(currency);
-    if (amount <= 0) throw new Error('Withdraw amount must be positive');
-    if (this.balance < amount) throw new Error('Insufficient funds');
+    if (amount <= 0) throw new BadRequestException('Withdraw amount must be positive');
+    if (this.balance < amount) throw new BadRequestException('Insufficient funds');
 
     this.apply(
       this.makeEvent(AccountEventTypes.MoneyWithdrawn, {
@@ -66,8 +67,8 @@ export class AccountAggregate extends AggregateRoot {
   }
 
   freeze(reason: string, context: CommandContext): void {
-    if (!reason) throw new Error('Freeze reason is required');
-    if (this.status === 'FROZEN') throw new Error('Account already frozen');
+    if (!reason) throw new BadRequestException('Freeze reason is required');
+    if (this.status === 'FROZEN') throw new BadRequestException('Account already frozen');
 
     this.apply(
       this.makeEvent(AccountEventTypes.AccountFrozen, {
@@ -122,13 +123,13 @@ export class AccountAggregate extends AggregateRoot {
 
   private ensureCurrency(currency: string): void {
     if (this.currency !== currency) {
-      throw new Error(`Currency mismatch. Account currency=${this.currency}, request=${currency}`);
+      throw new BadRequestException(`Currency mismatch. Account currency=${this.currency}, request=${currency}`);
     }
   }
 
   private ensureActive(): void {
     if (this.status !== 'ACTIVE') {
-      throw new Error('Account is not active');
+      throw new BadRequestException('Account is not active');
     }
   }
 

@@ -1,36 +1,57 @@
-# Event-Sourced Core Banking (NestJS Foundation)
+# Event-Sourced Core Banking
 
-This repository now contains a **senior-level scaffold** for an event-sourced, CQRS-based core banking / digital wallet system.
+A NestJS learning project for building a realistic core banking or digital wallet backend with:
 
-## Architecture decision: Modular Monolith first
+- Event sourcing for the write model
+- CQRS for the write/read split
+- Snapshotting for faster aggregate loads
+- Background projections for query APIs
+- PostgreSQL or in-memory infrastructure behind shared interfaces
 
-For a learning project and early product stage, this scaffold uses a **modular monolith** with clear boundaries:
+## What This Repo Does Today
 
-- `accounts` module (aggregate + commands)
-- `transfers` module (orchestration/saga entry point)
-- `infrastructure` module (event store, projections, messaging)
+- Create, deposit into, withdraw from, and freeze accounts
+- Persist account changes as immutable domain events
+- Rehydrate aggregates from event history, using snapshots every 100 versions
+- Maintain read models for account details, balances, and statement history
+- Run background projection updates from the global event stream
+- Track projection checkpoints so projection work resumes after restart
+- Run lightweight versioned SQL migrations in Postgres mode
 
-Why this over microservices initially:
+## Architecture
 
-- keeps complexity focused on event sourcing/CQRS fundamentals,
-- avoids distributed operational overhead too early,
-- enables later extraction of modules into services once boundaries stabilize.
+This repo uses a modular monolith with clear boundaries:
 
-## What is included
+- `accounts` for account commands, aggregate logic, projections, and queries
+- `transfers` for transfer orchestration scaffolding
+- `infrastructure` for database access, event store, snapshots, projections, and messaging
 
-- NestJS app with CQRS wiring
-- Domain-driven aggregate base and event contracts
-- Account aggregate with core invariants
-- Command handlers for account create/deposit/withdraw/freeze
-- Transfer command handler skeleton for cross-account orchestration
-- Event store abstraction with:
-  - in-memory implementation (fast local learning)
-  - PostgreSQL implementation (append-only stream + optimistic concurrency)
-- Projection replay runner skeleton
-- Kafka producer client skeleton for event integration
-- Docker and Docker Compose for app + PostgreSQL + Kafka
+High-level flow:
 
-## Project structure
+```text
+Client
+  |
+  v
+HTTP Controller
+  |
+  v
+Command Handler
+  |
+  v
+Load Aggregate (snapshot + tail events)
+  |
+  v
+Domain Decision
+  |
+  v
+Append Events to Event Store
+  |
+  +--> Background Projection Runner --> Read Tables
+  |
+  +--> Future Kafka / outbox integration
+```
+
+## Project Structure
 
 ```text
 src/
@@ -42,10 +63,82 @@ src/
     event-store/
     messaging/
     projections/
+    snapshots/
   modules/
     accounts/
+      application/
+      domain/
+      query/
     transfers/
 ```
+
+## Write Model
+
+The write side is event sourced:
+
+- the `AccountAggregate` enforces business rules
+- the `AccountRepository` loads the aggregate from its stream
+- new events are appended to the `events` table
+- optimistic concurrency is enforced with `expectedVersion`
+
+Example account stream:
+
+1. `AccountCreated`
+2. `MoneyDeposited`
+3. `MoneyWithdrawn`
+4. `AccountFrozen`
+
+The current account state is rebuilt from those facts, not from a mutable `accounts` row.
+
+## Snapshots
+
+To avoid replaying very long account streams from version `1` every time, the repo stores snapshots:
+
+- snapshot interval is currently `100` versions
+- snapshots are a performance optimization only
+- the event stream remains the source of truth
+
+Aggregate load flow:
+
+1. load latest snapshot for `account-{id}`
+2. restore aggregate state from snapshot
+3. read only events after the snapshot version
+4. replay the remaining tail events
+
+## Read Model
+
+The query side is served from projections, not from aggregate rehydration during reads.
+
+Current projection tables:
+
+- `account_summary`
+- `account_statement`
+- `projection_checkpoints`
+
+The background projection runner:
+
+- reads new events from the global event stream
+- projects account events into read tables
+- stores its last processed position
+- resumes from checkpoint after restart
+
+This means the query side is eventually consistent with the write side.
+
+## Storage Modes
+
+`EVENT_STORE_KIND` controls which infrastructure implementation is used:
+
+- `in-memory` for fast local learning and tests
+- `postgres` for persistent event store, snapshots, and read models
+
+In Postgres mode, the app uses:
+
+- `events` for the append-only event log
+- `snapshots` for aggregate snapshots
+- `account_summary` for current account state
+- `account_statement` for account history
+- `projection_checkpoints` for projection progress
+- `schema_migrations` for versioned SQL migrations
 
 ## Quickstart
 
@@ -61,434 +154,214 @@ docker compose up -d postgres zookeeper kafka
 npm install
 ```
 
-### 3) Run DB schema bootstrap
+### 3) Bootstrap schema once for a fresh Postgres container
 
 ```bash
 docker compose exec -T postgres psql -U banking -d banking -f /docker-entrypoint-initdb.d/init.sql
 ```
 
-### 4) Run app locally
+`init.sql` is useful for first-time container initialization. After that, incremental schema changes should be added as versioned migrations in:
+
+`src/infrastructure/db/migrations/migrations.ts`
+
+### 4) Run the app
 
 ```bash
 npm run start:dev
 ```
 
-Health endpoint:
+Base URL:
 
-- `GET http://localhost:3000/api/health`
+- `http://localhost:3000/api`
 
-## Example API commands
+Health check:
+
+- `GET /health`
+
+## Account Command Endpoints
 
 Create account:
 
 ```bash
 curl -X POST http://localhost:3000/api/accounts \
   -H "Content-Type: application/json" \
-  -d '{"accountId":"acc-1","ownerId":"user-1","currency":"USD"}'
+  -d "{\"accountId\":\"acc-1\",\"ownerId\":\"user-1\",\"currency\":\"USD\"}"
 ```
 
-Deposit:
+Deposit money:
 
 ```bash
 curl -X POST http://localhost:3000/api/accounts/acc-1/deposits \
   -H "Content-Type: application/json" \
-  -d '{"amount":1000,"currency":"USD","transactionId":"txn-1"}'
+  -d "{\"amount\":1000,\"currency\":\"USD\",\"transactionId\":\"txn-1\"}"
 ```
 
-Transfer:
+Withdraw money:
+
+```bash
+curl -X POST http://localhost:3000/api/accounts/acc-1/withdrawals \
+  -H "Content-Type: application/json" \
+  -d "{\"amount\":200,\"currency\":\"USD\",\"transactionId\":\"txn-2\"}"
+```
+
+Freeze account:
+
+```bash
+curl -X POST http://localhost:3000/api/accounts/acc-1/freeze \
+  -H "Content-Type: application/json" \
+  -d "{\"reason\":\"compliance review\"}"
+```
+
+Transfer scaffolding:
 
 ```bash
 curl -X POST http://localhost:3000/api/transfers \
   -H "Content-Type: application/json" \
-  -d '{"sourceAccountId":"acc-1","destinationAccountId":"acc-2","amount":150,"currency":"USD"}'
+  -d "{\"sourceAccountId\":\"acc-1\",\"destinationAccountId\":\"acc-2\",\"amount\":150,\"currency\":\"USD\"}"
 ```
 
-## Environment variables
+## Account Query Endpoints
 
-Key variables used by the scaffold:
+Get account details from `account_summary`:
 
-- `PORT` (default `3000`)
-- `EVENT_STORE_KIND` (`in-memory` or `postgres`)
-- `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`
-- `KAFKA_BROKER`, `KAFKA_CLIENT_ID`
+```bash
+curl http://localhost:3000/api/accounts/acc-1
+```
+
+Example response:
+
+```json
+{
+  "accountId": "acc-1",
+  "ownerId": "user-1",
+  "currency": "USD",
+  "status": "ACTIVE",
+  "balance": 800,
+  "version": 3,
+  "createdAt": "2026-03-22T10:00:00.000Z",
+  "updatedAt": "2026-03-22T10:05:00.000Z"
+}
+```
+
+Get current balance:
+
+```bash
+curl http://localhost:3000/api/accounts/acc-1/balance
+```
+
+Get account history from `account_statement`:
+
+```bash
+curl "http://localhost:3000/api/accounts/acc-1/history?limit=50&offset=0"
+```
+Examole response:
+
+```json
+{
+    "accountId": "100000",
+    "entries": [
+        {
+            "eventId": "ab2db266-6610-4a7f-8ad4-fe10851523fc",
+            "accountId": "100000",
+            "streamVersion": 1,
+            "eventType": "AccountCreated",
+            "occurredAt": "2026-03-22T21:22:08.718Z"
+        },
+        {
+            "eventId": "f5eecd0f-2981-4327-9652-83a1772c5424",
+            "accountId": "100000",
+            "streamVersion": 2,
+            "eventType": "MoneyDeposited",
+            "amount": 15000,
+            "currency": "NGN",
+            "transactionId": "txn-1",
+            "occurredAt": "2026-03-22T21:26:04.083Z"
+        },
+        {
+            "eventId": "fb917c12-f9e4-4f52-98ae-1dce314a7809",
+            "accountId": "100000",
+            "streamVersion": 3,
+            "eventType": "MoneyDeposited",
+            "amount": 25000,
+            "currency": "NGN",
+            "transactionId": "txn-1",
+            "occurredAt": "2026-03-22T21:26:47.177Z"
+        },
+        {
+            "eventId": "b4cbbcab-a5ba-424a-8e4a-cebd4eb3f074",
+            "accountId": "100000",
+            "streamVersion": 4,
+            "eventType": "MoneyWithdrawn",
+            "amount": 5000,
+            "currency": "NGN",
+            "transactionId": "txn-1",
+            "occurredAt": "2026-03-22T21:31:35.785Z"
+        }
+    ]
+}
+```
+
+## Eventual Consistency Note
+
+Write endpoints return once the event is appended to the event store. Query endpoints read from projections updated by a background worker. Because of that:
+
+- a write can succeed before the read model reflects it
+- reads are usually very fast
+- reads may lag briefly behind writes
+
+That tradeoff is intentional in CQRS systems.
+
+## Database And Migrations
+
+This repo does not use an ORM.
+
+Instead it uses:
+
+- `pg` for direct SQL access
+- a Nest provider called `PG_POOL` for shared connections
+- a lightweight migration runner on app startup in Postgres mode
+
+Migration flow:
+
+1. app starts
+2. if `EVENT_STORE_KIND=postgres`, the migration runner checks `schema_migrations`
+3. pending migrations are applied in order
+4. projection runner and repositories use the resulting schema
+
+For new schema changes:
+
+1. add a new migration object with the next version in `src/infrastructure/db/migrations/migrations.ts`
+2. do not edit old migrations that may already be applied in real environments
+
+## Environment Variables
+
+Key environment variables:
+
+- `PORT` default `3000`
+- `EVENT_STORE_KIND` either `in-memory` or `postgres`
+- `POSTGRES_HOST`
+- `POSTGRES_PORT`
+- `POSTGRES_USER`
+- `POSTGRES_PASSWORD`
+- `POSTGRES_DB`
+- `KAFKA_BROKER`
+- `KAFKA_CLIENT_ID`
 
 See `.env.example`.
 
-## Next engineering steps
-
-1. Add idempotency store keyed by command ID.
-2. Add snapshot store and snapshot-aware account repository.
-3. Replace transfer handler with full durable saga state machine + retries/timeouts.
-4. Build read projections (account summary, statement, transfer status).
-5. Add outbox pattern and Kafka consumers for projection workers.
-6. Add integration and concurrency tests for expected-version conflicts.
-# Event-Sourced Core Banking / Digital Wallet
-
-A learning project for building a **realistic core banking ledger** using **Event Sourcing + CQRS** patterns.
-
-This repository is intentionally architecture-first: the focus is on domain design, consistency boundaries, event flows, and operational concerns that matter in production systems.
-
----
-
-## 1) Domain Goals
-
-The system supports the following core capabilities:
-
-1. Create accounts
-2. Deposit money
-3. Withdraw money
-4. Transfer money
-5. Freeze/unfreeze accounts
-6. Reverse transactions
-
-Design objectives:
-
-- Full auditability (append-only immutable history)
-- Deterministic aggregate reconstruction
-- Strong consistency per aggregate via optimistic concurrency
-- Read scalability through projections
-- Replayability for debugging and model evolution
-- Long-term performance through snapshots
-- Reliable multi-aggregate transfer orchestration via saga/process manager
-
----
-
-## 2) Ubiquitous Language
-
-- **Account**: A ledger account owned by a customer.
-- **Ledger Entry**: A debit or credit movement attached to a transaction.
-- **Transaction**: Business action represented by one or more events.
-- **Aggregate**: Consistency boundary; here, usually `Account`.
-- **Command**: Intent to change state (`DepositMoney`, `TransferMoney`, etc.).
-- **Event**: Fact that already happened (`MoneyDeposited`, `TransferCompleted`).
-- **Projection**: Read model built from event stream(s).
-- **Saga**: Long-running orchestrator handling multi-step workflow across aggregates.
-
----
-
-## 3) High-Level Architecture
-
-```text
-Clients/API
-   |
-   v
-Command API (write side)
-   |
-   +--> Command Handlers --> Aggregate Rehydration --> Domain Decision --> New Events
-                                  ^                               |
-                                  |                               v
-                             Event Store <--- Append (expected version)
-                                  |
-                                  +--> Event Bus / Subscription --> Projections (read side)
-                                  |
-                                  +--> Sagas / Process Managers
-
-Read API (query side) <----- Read Models / Projections
-```
-
-### Architectural split
-
-- **Write model (command side)**
-  - Enforces invariants and business rules.
-  - Persists only events.
-- **Read model (query side)**
-  - Optimized denormalized projections for API queries.
-  - Eventually consistent with write model.
-
----
-
-## 4) Event Store Design (Append-Only)
-
-At minimum, every persisted event should include:
-
-- `event_id` (UUID)
-- `stream_id` (e.g., `account-{accountId}`)
-- `stream_version` (monotonic per stream)
-- `event_type`
-- `event_data` (JSON/Avro/Protobuf payload)
-- `event_metadata`:
-  - `correlation_id` (tracks request flow)
-  - `causation_id` (what event/command caused this)
-  - `command_id` (idempotency key)
-  - `actor`, `tenant`, `trace_id`
-- `recorded_at` (UTC timestamp)
-
-### Suggested streams
-
-- Account stream: `account-{id}`
-- Transfer stream (optional orchestration stream): `transfer-{id}`
-
-### Global ordering
-
-Maintain a global sequence/checkpoint (e.g., `position`) to:
-
-- drive projection subscriptions,
-- resume consumers from last checkpoint,
-- enable deterministic replay over the whole system.
-
----
-
-## 5) Aggregate Model & Invariants
-
-## 5.1 Account Aggregate
-
-Representative state:
-
-- `account_id`
-- `owner_id`
-- `status` (`ACTIVE`, `FROZEN`, `CLOSED`)
-- `currency`
-- `available_balance`
-- `held_balance` (optional for authorization flows)
-- `version`
-
-Key invariants:
-
-- Cannot withdraw/transfer if account is frozen.
-- Cannot overdraw unless overdraft policy allows it.
-- Currency mismatch is rejected.
-- Account must exist and be active for money movement.
-- Reversal can only target a reversible, existing, and not-yet-reversed transaction.
-
-## 5.2 Command → Event examples
-
-- `CreateAccount` → `AccountCreated`
-- `DepositMoney` → `MoneyDeposited`
-- `WithdrawMoney` → `MoneyWithdrawn`
-- `FreezeAccount` → `AccountFrozen`
-- `UnfreezeAccount` → `AccountUnfrozen`
-- `RequestTransactionReversal` → `TransactionReversalRequested`
-- `ApproveTransactionReversal` → `TransactionReversed`
-
----
-
-## 6) Core Event Catalog
-
-### Account lifecycle
-
-- `AccountCreated`
-- `AccountFrozen`
-- `AccountUnfrozen`
-- `AccountClosed` (optional)
-
-### Money movement
-
-- `MoneyDeposited`
-- `MoneyWithdrawn`
-
-### Transfer workflow events
-
-- `TransferInitiated`
-- `TransferDebitReserved` *(optional if using holds)*
-- `TransferDebited`
-- `TransferCredited`
-- `TransferCompleted`
-- `TransferFailed`
-- `TransferCompensated` *(if partial completion needs compensation)*
-
-### Reversal events
-
-- `TransactionReversalRequested`
-- `TransactionReversalApproved` / `TransactionReversalRejected`
-- `TransactionReversed`
-
-Each event should carry:
-
-- idempotency key (`command_id`),
-- business reference (`transaction_id`, `transfer_id`),
-- monetary details (`amount`, `currency`),
-- reason codes for compliance/audit.
-
----
-
-## 7) Optimistic Concurrency Control
-
-Use expected stream version on append:
-
-- load aggregate from stream with current version `v`
-- compute new events
-- append with `expected_version = v`
-- if conflict: reject and retry command with fresh state
-
-This prevents lost updates without global locks.
-
-Conflict handling strategy:
-
-1. Detect `WrongExpectedVersion`
-2. Reload stream
-3. Re-evaluate command against latest aggregate state
-4. Retry if still valid; otherwise return business error
-
----
-
-## 8) Projections (Read Models)
-
-Create multiple projections for different query patterns:
-
-1. **AccountSummaryProjection**
-   - account status, available balance, current version
-2. **AccountStatementProjection**
-   - chronological transaction list with running balance
-3. **TransferStatusProjection**
-   - transfer lifecycle state machine for API/UI
-4. **DailyLedgerProjection**
-   - totals by currency/day for reporting and reconciliation
-
-Projection rules:
-
-- Subscribe by global position.
-- Store checkpoint atomically with projection update.
-- Ensure idempotency (`event_id` dedupe table or upsert patterns).
-- Support rebuild from zero (drop + replay).
-
----
-
-## 9) Event Replay Strategy
-
-Replay is mandatory for:
-
-- rebuilding new projections,
-- fixing projection bugs,
-- schema evolution backfills,
-- audit investigations.
-
-Operational recommendations:
-
-- Keep replay separate from live consumers where possible.
-- Throttle and batch replay to avoid DB saturation.
-- Use feature flags when switching from old to rebuilt projection.
-- Record replay metrics (lag, events/sec, failures).
-
----
-
-## 10) Snapshotting Strategy
-
-Snapshots optimize aggregate load time for long streams.
-
-### Snapshot policy (example)
-
-- Snapshot every `N=100` events per account stream, or
-- Snapshot when rehydrate time crosses threshold.
-
-### Snapshot content
-
-- aggregate materialized state
-- last applied stream version
-- snapshot timestamp
-
-### Rehydrate algorithm
-
-1. Load latest snapshot for stream
-2. Load events after `snapshot.version`
-3. Apply remaining events
-4. Return aggregate with final version
-
-Important: snapshots are a performance optimization only; **events remain source of truth**.
-
----
-
-## 11) Transfer Saga / Process Manager
-
-Transfers involve two accounts (`source`, `destination`) and cannot be atomically committed across two streams without distributed transactions.
-
-Use a **Saga** to orchestrate reliably:
-
-1. `TransferInitiated`
-2. Validate source/destination status + currency rules
-3. Issue `DebitSourceAccount` command
-4. On success, issue `CreditDestinationAccount` command
-5. If credit fails after debit success, trigger compensation (`RefundSourceAccount`) and emit `TransferCompensated`
-6. Emit terminal event: `TransferCompleted` or `TransferFailed`
-
-### Saga design considerations
-
-- Persist saga state (step, retries, timeout deadlines).
-- Use correlation IDs for all transfer-related events.
-- Make every saga command idempotent.
-- Add retry policy with exponential backoff and dead-letter handling.
-- Add timeout handling (e.g., stuck transfer auto-fail + compensation).
-
----
-
-## 12) Reversal Design
-
-Reversals should be explicit business operations, not event deletion.
-
-Rules:
-
-- Original event remains immutable.
-- Reversal emits new compensating events.
-- Track `reverses_transaction_id` and `reversed_by_transaction_id` links.
-- Enforce single-reversal rule unless policy supports multi-stage corrections.
-- Require reason + actor metadata for compliance.
-
----
-
-## 13) Non-Functional Requirements (Real-World Mindset)
-
-- **Audit & Compliance**: immutable logs, traceability, reason codes, actor identity.
-- **Security**: authN/authZ, encryption at rest/in transit, least privilege for projection consumers.
-- **Observability**:
-  - command latency,
-  - event append failures,
-  - projection lag,
-  - saga failure/compensation counts.
-- **Resilience**: idempotent handlers, retries, poison-message strategy.
-- **Data governance**: schema versioning and upcasters for old events.
-
----
-
-## 14) Suggested Implementation Roadmap
-
-### Phase 1: Core write model
-
-- Implement event store abstraction + append/read APIs.
-- Implement Account aggregate + commands/events.
-- Add optimistic concurrency and idempotency keys.
-
-### Phase 2: Read model basics
-
-- Build account summary and statement projections.
-- Add checkpointing and replay tooling.
-
-### Phase 3: Transfers + saga
-
-- Implement transfer saga with retries/timeouts.
-- Add transfer status projection.
-
-### Phase 4: Snapshots + operations
-
-- Add snapshot store and rehydration optimization.
-- Add replay CLI and observability dashboards.
-
-### Phase 5: Advanced banking behavior
-
-- Reversal workflows with approvals.
-- Holds/authorizations and settlement windows.
-- Multi-currency and FX policies (optional).
-
----
-
-## 15) Example Command Flow (Withdraw)
-
-1. API receives `WithdrawMoney(accountId, amount, commandId)`
-2. Handler loads account stream (or snapshot + tail events)
-3. Aggregate validates business rules (status, funds, currency)
-4. Aggregate emits `MoneyWithdrawn`
-5. Event store append with expected version
-6. Projection updates account summary and statement
-7. Query API returns updated balance after projection catch-up (or read-your-own-write strategy)
-
----
-
-## 16) Next Step in This Repo
-
-If you want, the next practical step is to scaffold a minimal codebase with:
-
-- domain model (`Account` aggregate + events + command handlers),
-- pluggable event store interface,
-- in-memory event store for tests,
-- projection worker with checkpointing,
-- transfer saga state machine.
-
-This keeps the project focused on learning **real event-driven banking internals** rather than CRUD scaffolding.
+## Current Limitations
+
+- account query projections are currently the only implemented read models
+- projections are updated by an in-process poller, not Kafka consumers yet
+- transfer flow is still scaffolding rather than a full durable saga
+- no idempotency store for commands yet
+- no read-your-own-write strategy yet for query-after-command UX
+
+## Suggested Next Steps
+
+1. Add replay tooling for rebuilding projections from zero.
+2. Add transfer status projection and query endpoint.
+3. Add an outbox pattern for reliable event publication.
+4. Move projections to dedicated workers or Kafka consumers if needed.
+5. Add command idempotency keyed by `commandId`.
+6. Add integration tests covering concurrency conflicts and projection catch-up.
