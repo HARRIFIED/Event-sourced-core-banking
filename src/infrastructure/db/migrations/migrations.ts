@@ -66,4 +66,23 @@ export const schemaMigrations: SqlMigration[] = [
       );
     `,
   },
+  {
+    version: 2,
+    name: 'create-outbox-events-table',
+    sql: `
+      CREATE TABLE IF NOT EXISTS outbox_events (
+        id UUID PRIMARY KEY,
+        topic VARCHAR(255) NOT NULL,
+        message_key VARCHAR(255) NOT NULL,
+        payload JSONB NOT NULL,
+        created_at TIMESTAMPTZ NOT NULL,
+        published_at TIMESTAMPTZ NULL,
+        attempts INT NOT NULL DEFAULT 0,
+        last_error TEXT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_outbox_events_pending_created_at
+        ON outbox_events(published_at, created_at);
+    `,
+  },
 ];

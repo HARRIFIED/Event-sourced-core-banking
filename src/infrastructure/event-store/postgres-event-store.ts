@@ -29,19 +29,42 @@ export class PostgresEventStore implements EventStore, OnModuleDestroy {
         );
       }
 
+      const appendedEvents: DomainEvent[] = [];
       for (let i = 0; i < events.length; i += 1) {
         const event = events[i];
+        const persistedEvent: DomainEvent = {
+          ...event,
+          streamId,
+          streamVersion: currentVersion + i + 1,
+        };
         await client.query(
           `INSERT INTO events (
             event_id, stream_id, stream_version, event_type, event_data, event_metadata, occurred_at
           ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::timestamptz)`,
           [
-            event.eventId,
+            persistedEvent.eventId,
             streamId,
-            currentVersion + i + 1,
-            event.eventType,
-            JSON.stringify(event.data),
-            JSON.stringify(event.metadata),
+            persistedEvent.streamVersion,
+            persistedEvent.eventType,
+            JSON.stringify(persistedEvent.data),
+            JSON.stringify(persistedEvent.metadata),
+            persistedEvent.occurredAt,
+          ],
+        );
+        appendedEvents.push(persistedEvent);
+      }
+
+      for (const event of appendedEvents) {
+        await client.query(
+          `INSERT INTO outbox_events (
+             id, topic, message_key, payload, created_at, attempts, published_at, last_error
+           ) VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz, 0, NULL, NULL)
+           ON CONFLICT (id) DO NOTHING`,
+          [
+            event.eventId,
+            this.topicForStream(streamId),
+            streamId,
+            JSON.stringify(event),
             event.occurredAt,
           ],
         );
@@ -100,5 +123,9 @@ export class PostgresEventStore implements EventStore, OnModuleDestroy {
 
   async onModuleDestroy(): Promise<void> {
     await this.pool.end();
+  }
+
+  private topicForStream(streamId: string): string {
+    return `${streamId.split('-')[0]}-events`;
   }
 }

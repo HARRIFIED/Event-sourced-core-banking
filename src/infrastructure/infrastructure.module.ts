@@ -6,6 +6,10 @@ import { EVENT_STORE } from './event-store/event-store.interface';
 import { InMemoryEventStore } from './event-store/in-memory-event-store';
 import { PostgresEventStore } from './event-store/postgres-event-store';
 import { KafkaClient } from './messaging/kafka.client';
+import { InMemoryOutboxStore } from './outbox/in-memory-outbox-store';
+import { PostgresOutboxStore } from './outbox/postgres-outbox-store';
+import { OUTBOX_STORE } from './outbox/outbox-store.interface';
+import { OutboxPublisherService } from './outbox/outbox-publisher.service';
 import { ProjectionRunnerService } from './projections/projection-runner.service';
 import { InMemorySnapshotStore } from './snapshots/in-memory-snapshot-store';
 import { PostgresSnapshotStore } from './snapshots/postgres-snapshot-store';
@@ -21,12 +25,15 @@ import { PostgresAccountReadModelRepository } from '../modules/accounts/query/po
     MigrationRunnerService,
     InMemoryEventStore,
     PostgresEventStore,
+    InMemoryOutboxStore,
+    PostgresOutboxStore,
     InMemorySnapshotStore,
     PostgresSnapshotStore,
     InMemoryAccountReadModelRepository,
     PostgresAccountReadModelRepository,
     AccountProjector,
     KafkaClient,
+    OutboxPublisherService,
     ProjectionRunnerService,
     {
       provide: EVENT_STORE,
@@ -35,6 +42,18 @@ import { PostgresAccountReadModelRepository } from '../modules/accounts/query/po
         configService: ConfigService,
         inMemoryStore: InMemoryEventStore,
         postgresStore: PostgresEventStore,
+      ) => {
+        const storeKind = configService.get<string>('EVENT_STORE_KIND', 'in-memory');
+        return storeKind === 'postgres' ? postgresStore : inMemoryStore;
+      },
+    },
+    {
+      provide: OUTBOX_STORE,
+      inject: [ConfigService, InMemoryOutboxStore, PostgresOutboxStore],
+      useFactory: (
+        configService: ConfigService,
+        inMemoryStore: InMemoryOutboxStore,
+        postgresStore: PostgresOutboxStore,
       ) => {
         const storeKind = configService.get<string>('EVENT_STORE_KIND', 'in-memory');
         return storeKind === 'postgres' ? postgresStore : inMemoryStore;
@@ -67,9 +86,11 @@ import { PostgresAccountReadModelRepository } from '../modules/accounts/query/po
   ],
   exports: [
     EVENT_STORE,
+    OUTBOX_STORE,
     SNAPSHOT_STORE,
     ACCOUNT_READ_MODEL_REPOSITORY,
     KafkaClient,
+    OutboxPublisherService,
     MigrationRunnerService,
     ProjectionRunnerService,
   ],
