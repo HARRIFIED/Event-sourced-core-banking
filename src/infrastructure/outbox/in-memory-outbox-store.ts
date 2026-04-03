@@ -4,6 +4,7 @@ import { OutboxMessage, OutboxStore, PendingOutboxMessage } from './outbox-store
 @Injectable()
 export class InMemoryOutboxStore implements OutboxStore {
   private readonly messages = new Map<string, PendingOutboxMessage>();
+  private readonly claimed = new Set<string>();
 
   async stage(messages: OutboxMessage[]): Promise<void> {
     messages.forEach((message) => {
@@ -19,11 +20,14 @@ export class InMemoryOutboxStore implements OutboxStore {
     });
   }
 
-  async getPending(limit = 100): Promise<PendingOutboxMessage[]> {
-    return [...this.messages.values()]
-      .filter((message) => !message.publishedAt)
+  async claimPending(limit = 100): Promise<PendingOutboxMessage[]> {
+    const pending = [...this.messages.values()]
+      .filter((message) => !message.publishedAt && !this.claimed.has(message.id))
       .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
       .slice(0, limit);
+
+    pending.forEach((message) => this.claimed.add(message.id));
+    return pending;
   }
 
   async markPublished(id: string, publishedAt = new Date().toISOString()): Promise<void> {
@@ -37,6 +41,7 @@ export class InMemoryOutboxStore implements OutboxStore {
       publishedAt,
       lastError: null,
     });
+    this.claimed.delete(id);
   }
 
   async markFailed(id: string, error: string): Promise<void> {
@@ -50,5 +55,6 @@ export class InMemoryOutboxStore implements OutboxStore {
       attempts: current.attempts + 1,
       lastError: error,
     });
+    this.claimed.delete(id);
   }
 }

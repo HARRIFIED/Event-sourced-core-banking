@@ -13,7 +13,7 @@ export interface PendingOutboxMessage extends OutboxMessage {}
 
 export interface OutboxStore {
   stage(messages: OutboxMessage[]): Promise<void>;
-  getPending(limit?: number): Promise<PendingOutboxMessage[]>;
+  claimPending(limit?: number): Promise<PendingOutboxMessage[]>;
   markPublished(id: string, publishedAt?: string): Promise<void>;
   markFailed(id: string, error: string): Promise<void>;
 }

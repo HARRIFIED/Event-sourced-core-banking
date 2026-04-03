@@ -1,12 +1,13 @@
 import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { Kafka, Producer } from 'kafkajs';
+import { Consumer, Kafka, Producer } from 'kafkajs';
 
 @Injectable()
 export class KafkaClient implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(KafkaClient.name);
   private readonly kafka: Kafka;
   private readonly producer: Producer;
+  private readonly consumers = new Set<Consumer>();
 
   constructor(private readonly configService: ConfigService) {
     this.kafka = new Kafka({
@@ -28,7 +29,20 @@ export class KafkaClient implements OnModuleInit, OnModuleDestroy {
     });
   }
 
+  async createConsumer(groupId: string): Promise<Consumer> {
+    const consumer = this.kafka.consumer({ groupId });
+    await consumer.connect();
+    this.consumers.add(consumer);
+    return consumer;
+  }
+
   async onModuleDestroy(): Promise<void> {
+    await Promise.all(
+      [...this.consumers].map(async (consumer) => {
+        await consumer.disconnect();
+        this.consumers.delete(consumer);
+      }),
+    );
     await this.producer.disconnect();
   }
 }

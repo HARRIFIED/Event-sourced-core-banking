@@ -85,4 +85,15 @@ export const schemaMigrations: SqlMigration[] = [
         ON outbox_events(published_at, created_at);
     `,
   },
+  {
+    version: 3,
+    name: 'add-outbox-processing-lock-columns',
+    sql: `
+      ALTER TABLE outbox_events
+      ADD COLUMN IF NOT EXISTS processing_started_at TIMESTAMPTZ NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_outbox_events_processing_started_at
+        ON outbox_events(processing_started_at);
+    `,
+  },
 ];

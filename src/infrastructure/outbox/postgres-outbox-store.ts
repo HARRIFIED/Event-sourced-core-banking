@@ -43,41 +43,64 @@ export class PostgresOutboxStore implements OutboxStore {
     }
   }
 
-  async getPending(limit = 100): Promise<PendingOutboxMessage[]> {
-    const result = await this.pool.query<{
-      id: string;
-      topic: string;
-      message_key: string;
-      payload: object;
-      created_at: Date;
-      published_at: Date | null;
-      attempts: number;
-      last_error: string | null;
-    }>(
-      `SELECT id, topic, message_key, payload, created_at, published_at, attempts, last_error
-       FROM outbox_events
-       WHERE published_at IS NULL
-       ORDER BY created_at ASC
-       LIMIT $1`,
-      [limit],
-    );
+  async claimPending(limit = 100): Promise<PendingOutboxMessage[]> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
 
-    return result.rows.map((row) => ({
-      id: row.id,
-      topic: row.topic,
-      messageKey: row.message_key,
-      payload: row.payload,
-      createdAt: new Date(row.created_at).toISOString(),
-      publishedAt: row.published_at ? new Date(row.published_at).toISOString() : null,
-      attempts: Number(row.attempts),
-      lastError: row.last_error,
-    }));
+      const result = await client.query<{
+        id: string;
+        topic: string;
+        message_key: string;
+        payload: object;
+        created_at: Date;
+        published_at: Date | null;
+        attempts: number;
+        last_error: string | null;
+      }>(
+        `WITH next_batch AS (
+           SELECT id
+           FROM outbox_events
+           WHERE published_at IS NULL
+             AND processing_started_at IS NULL
+           ORDER BY created_at ASC
+           LIMIT $1
+           FOR UPDATE SKIP LOCKED
+         )
+         UPDATE outbox_events AS target
+         SET processing_started_at = NOW()
+         FROM next_batch
+         WHERE target.id = next_batch.id
+         RETURNING target.id, target.topic, target.message_key, target.payload,
+                   target.created_at, target.published_at, target.attempts, target.last_error`,
+        [limit],
+      );
+
+      await client.query('COMMIT');
+
+      return result.rows.map((row) => ({
+        id: row.id,
+        topic: row.topic,
+        messageKey: row.message_key,
+        payload: row.payload,
+        createdAt: new Date(row.created_at).toISOString(),
+        publishedAt: row.published_at ? new Date(row.published_at).toISOString() : null,
+        attempts: Number(row.attempts),
+        lastError: row.last_error,
+      }));
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async markPublished(id: string, publishedAt = new Date().toISOString()): Promise<void> {
     await this.pool.query(
       `UPDATE outbox_events
        SET published_at = $2::timestamptz,
+           processing_started_at = NULL,
            last_error = NULL
        WHERE id = $1`,
       [id, publishedAt],
@@ -88,6 +111,7 @@ export class PostgresOutboxStore implements OutboxStore {
     await this.pool.query(
       `UPDATE outbox_events
        SET attempts = attempts + 1,
+           processing_started_at = NULL,
            last_error = $2
        WHERE id = $1`,
       [id, error],

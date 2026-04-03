@@ -14,7 +14,7 @@ export class AccountProjector {
     private readonly readModels: AccountReadModelRepository,
   ) {}
 
-  async project(event: DomainEvent & { position: number }): Promise<boolean> {
+  async project(event: DomainEvent & { position?: number }): Promise<boolean> {
     switch (event.eventType) {
       case AccountEventTypes.AccountCreated:
         await this.projectAccountCreated(event);
@@ -33,7 +33,7 @@ export class AccountProjector {
     }
   }
 
-  private async projectAccountCreated(event: DomainEvent & { position: number }): Promise<void> {
+  private async projectAccountCreated(event: DomainEvent & { position?: number }): Promise<void> {
     const accountId = event.data.accountId as string;
     const occurredAt = event.occurredAt;
     const existing = await this.readModels.getAccountSummary(accountId);
@@ -61,7 +61,7 @@ export class AccountProjector {
     });
   }
 
-  private async projectMoneyDeposited(event: DomainEvent & { position: number }): Promise<void> {
+  private async projectMoneyDeposited(event: DomainEvent & { position?: number }): Promise<void> {
     const accountId = event.data.accountId as string;
     const summary = await this.getRequiredSummary(accountId);
     if (summary.version >= event.streamVersion) {
@@ -89,7 +89,7 @@ export class AccountProjector {
     });
   }
 
-  private async projectMoneyWithdrawn(event: DomainEvent & { position: number }): Promise<void> {
+  private async projectMoneyWithdrawn(event: DomainEvent & { position?: number }): Promise<void> {
     const accountId = event.data.accountId as string;
     const summary = await this.getRequiredSummary(accountId);
     if (summary.version >= event.streamVersion) {
@@ -117,7 +117,7 @@ export class AccountProjector {
     });
   }
 
-  private async projectAccountFrozen(event: DomainEvent & { position: number }): Promise<void> {
+  private async projectAccountFrozen(event: DomainEvent & { position?: number }): Promise<void> {
     const accountId = event.data.accountId as string;
     const summary = await this.getRequiredSummary(accountId);
     if (summary.version >= event.streamVersion) {

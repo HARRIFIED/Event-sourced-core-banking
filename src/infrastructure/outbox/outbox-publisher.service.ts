@@ -35,7 +35,7 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
   private async runLoop(): Promise<void> {
     while (this.isRunning) {
       try {
-        const messages = await this.outboxStore.getPending(this.batchSize);
+        const messages = await this.outboxStore.claimPending(this.batchSize);
         if (messages.length === 0) {
           await this.sleep(this.pollIntervalMs);
           continue;

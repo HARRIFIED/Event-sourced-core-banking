@@ -64,9 +64,12 @@ CREATE TABLE IF NOT EXISTS outbox_events (
   payload JSONB NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
   published_at TIMESTAMPTZ NULL,
+  processing_started_at TIMESTAMPTZ NULL,
   attempts INT NOT NULL DEFAULT 0,
   last_error TEXT NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_outbox_events_pending_created_at
   ON outbox_events(published_at, created_at);
+CREATE INDEX IF NOT EXISTS idx_outbox_events_processing_started_at
+  ON outbox_events(processing_started_at);

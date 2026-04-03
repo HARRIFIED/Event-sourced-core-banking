@@ -10,6 +10,7 @@ import { InMemoryOutboxStore } from './outbox/in-memory-outbox-store';
 import { PostgresOutboxStore } from './outbox/postgres-outbox-store';
 import { OUTBOX_STORE } from './outbox/outbox-store.interface';
 import { OutboxPublisherService } from './outbox/outbox-publisher.service';
+import { AccountEventsConsumerService } from './projections/account-events-consumer.service';
 import { ProjectionRunnerService } from './projections/projection-runner.service';
 import { InMemorySnapshotStore } from './snapshots/in-memory-snapshot-store';
 import { PostgresSnapshotStore } from './snapshots/postgres-snapshot-store';
@@ -34,6 +35,7 @@ import { PostgresAccountReadModelRepository } from '../modules/accounts/query/po
     AccountProjector,
     KafkaClient,
     OutboxPublisherService,
+    AccountEventsConsumerService,
     ProjectionRunnerService,
     {
       provide: EVENT_STORE,
@@ -91,6 +93,7 @@ import { PostgresAccountReadModelRepository } from '../modules/accounts/query/po
     ACCOUNT_READ_MODEL_REPOSITORY,
     KafkaClient,
     OutboxPublisherService,
+    AccountEventsConsumerService,
     MigrationRunnerService,
     ProjectionRunnerService,
   ],
