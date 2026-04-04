@@ -349,6 +349,11 @@ Key environment variables:
 
 See `.env.example`.
 
+Kafka broker values depend on where the app runs:
+
+- host machine with `npm run start:dev` -> `KAFKA_BROKER=localhost:29092`
+- Docker Compose app container -> `KAFKA_BROKER=kafka:9092`
+
 ## Current Limitations
 
 - account query projections are currently the only implemented read models

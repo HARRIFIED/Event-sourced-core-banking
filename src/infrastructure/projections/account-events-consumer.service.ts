@@ -27,23 +27,36 @@ export class AccountEventsConsumerService implements OnModuleInit, OnModuleDestr
       'core-banking-account-projections',
     );
 
-    this.consumer = await this.kafkaClient.createConsumer(groupId);
-    await this.consumer.subscribe({ topic: 'account-events', fromBeginning: true });
-    await this.consumer.run({
-      eachMessage: async ({ message }) => {
-        if (!message.value) {
-          return;
-        }
+    try {
+      this.consumer = await this.kafkaClient.createConsumer(groupId);
+      await this.consumer.subscribe({ topic: 'account-events', fromBeginning: true });
+      await this.consumer.run({
+        eachMessage: async ({ message }) => {
+          if (!message.value) {
+            return;
+          }
 
-        const event = JSON.parse(message.value.toString()) as DomainEvent;
-        const handled = await this.accountProjector.project(event);
-        if (handled) {
-          this.logger.debug(`Projected Kafka event ${event.eventType} v${event.streamVersion}`);
-        }
-      },
-    });
+          const event = JSON.parse(message.value.toString()) as DomainEvent;
+          const handled = await this.accountProjector.project(event);
+          if (handled) {
+            this.logger.debug(`Projected Kafka event ${event.eventType} v${event.streamVersion}`);
+          }
+        },
+      });
 
-    this.logger.log(`Kafka live projection consumer subscribed to account-events with group ${groupId}`);
+      this.logger.log(
+        `Kafka live projection consumer subscribed to account-events with group ${groupId} ` +
+        `using brokers ${this.kafkaClient.getConfiguredBrokers().join(', ')}`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      this.logger.error(
+        `Kafka live projection consumer failed to start. ` +
+        `Configured brokers: ${this.kafkaClient.getConfiguredBrokers().join(', ')}. ` +
+        `Original error: ${message}`,
+      );
+      throw error;
+    }
   }
 
   async onModuleDestroy(): Promise<void> {
