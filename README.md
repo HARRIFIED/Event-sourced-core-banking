@@ -5,7 +5,7 @@ A NestJS learning project for building a realistic core banking or digital walle
 - Event sourcing for the write model
 - CQRS for the write/read split
 - Snapshotting for faster aggregate loads
-- Background projections for query APIs
+- Kafka-driven live projections for query APIs
 - PostgreSQL or in-memory infrastructure behind shared interfaces
 
 ## What This Repo Does Today
@@ -14,9 +14,17 @@ A NestJS learning project for building a realistic core banking or digital walle
 - Persist account changes as immutable domain events
 - Rehydrate aggregates from event history, using snapshots every 100 versions
 - Maintain read models for account details, balances, and statement history
-- Run background projection updates from the global event stream
-- Track projection checkpoints so projection work resumes after restart
+- Publish persisted events through a transactional outbox
+- Update live account projections through Kafka consumers
+- Keep manual replay and rebuild tooling backed by the event store
 - Run lightweight versioned SQL migrations in Postgres mode
+
+## Architecture Specs
+
+Longer design context lives in:
+
+- [docs/spec/spec-001.md](docs/spec/spec-001.md) for the baseline event-sourced write model, snapshots, and initial query side before outbox/Kafka live projection
+- [docs/spec/spec-002.md](docs/spec/spec-002.md) for the outbox, Kafka live projections, projection gap handling, and rebuild tooling update
 
 ## Architecture
 
@@ -46,9 +54,9 @@ Domain Decision
   v
 Append Events to Event Store
   |
-  +--> Background Projection Runner --> Read Tables
+  +--> Transactional Outbox --> Kafka --> Live Projection Consumer --> Read Tables
   |
-  +--> Future Kafka / outbox integration
+  +--> Manual Projection Replay / Rebuild From Event Store
 ```
 
 ## Project Structure
@@ -115,12 +123,13 @@ Current projection tables:
 - `account_statement`
 - `projection_checkpoints`
 
-The background projection runner:
+Live account projection updates are Kafka-driven.
 
-- reads new events from the global event stream
-- projects account events into read tables
-- stores its last processed position
-- resumes from checkpoint after restart
+The manual projection runner remains in the codebase for:
+
+- replay
+- rebuild
+- repair from source of truth
 
 This means the query side is eventually consistent with the write side.
 
@@ -138,6 +147,7 @@ In Postgres mode, the app uses:
 - `account_summary` for current account state
 - `account_statement` for account history
 - `projection_checkpoints` for projection progress
+- `outbox_events` for reliable event publication
 - `schema_migrations` for versioned SQL migrations
 
 ## Quickstart
@@ -332,7 +342,7 @@ Examole response:
 
 ## Eventual Consistency Note
 
-Write endpoints return once the event is appended to the event store. Query endpoints read from projections updated by a background worker. Because of that:
+Write endpoints return once the event is appended to the event store. Query endpoints read from projections updated asynchronously. Because of that:
 
 - a write can succeed before the read model reflects it
 - reads are usually very fast
@@ -355,7 +365,7 @@ Migration flow:
 1. app starts
 2. if `EVENT_STORE_KIND=postgres`, the migration runner checks `schema_migrations`
 3. pending migrations are applied in order
-4. projection runner and repositories use the resulting schema
+4. outbox, projections, and repositories use the resulting schema
 
 For new schema changes:
 
@@ -386,16 +396,17 @@ Kafka broker values depend on where the app runs:
 ## Current Limitations
 
 - account query projections are currently the only implemented read models
-- projections are updated by an in-process poller, not Kafka consumers yet
 - transfer flow is still scaffolding rather than a full durable saga
 - no idempotency store for commands yet
 - no read-your-own-write strategy yet for query-after-command UX
+- rebuild/admin endpoints are not authenticated yet
+- Kafka-based live projections still need broader operational hardening such as monitoring, lag visibility, and richer failure handling
 
 ## Suggested Next Steps
 
-1. Add replay tooling for rebuilding projections from zero.
-2. Add transfer status projection and query endpoint.
-3. Add an outbox pattern for reliable event publication.
-4. Move projections to dedicated workers or Kafka consumers if needed.
-5. Add command idempotency keyed by `commandId`.
-6. Add integration tests covering concurrency conflicts and projection catch-up.
+1. Add transfer status projection and query endpoint.
+2. Implement the durable transfer saga/process manager.
+3. Add command idempotency keyed by `commandId`.
+4. Add auth and audit logging for admin rebuild endpoints.
+5. Add monitoring for outbox lag, consumer lag, and projection failures.
+6. Add integration tests covering concurrency conflicts, projection gaps, and rebuild flows.
