@@ -254,6 +254,35 @@ Get account history from `account_statement`:
 ```bash
 curl "http://localhost:3000/api/accounts/acc-1/history?limit=50&offset=0"
 ```
+
+## Projection Repair And Rebuild
+
+If the read model falls behind or becomes inconsistent, rebuild it from the event store.
+
+HTTP admin endpoints:
+
+- `POST /api/admin/projections/accounts/:accountId/rebuild`
+- `POST /api/admin/projections/accounts/rebuild-all`
+
+Examples:
+
+```bash
+curl -X POST http://localhost:3000/api/admin/projections/accounts/acc-1/rebuild
+```
+
+```bash
+curl -X POST http://localhost:3000/api/admin/projections/accounts/rebuild-all
+```
+
+CLI rebuild script:
+
+```bash
+npm run projections:rebuild -- account acc-1
+```
+
+```bash
+npm run projections:rebuild -- all
+```
 Examole response:
 
 ```json

@@ -96,4 +96,12 @@ export const schemaMigrations: SqlMigration[] = [
         ON outbox_events(processing_started_at);
     `,
   },
+  {
+    version: 4,
+    name: 'enforce-account-statement-stream-version-uniqueness',
+    sql: `
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_account_statement_account_version
+        ON account_statement(account_id, stream_version);
+    `,
+  },
 ];

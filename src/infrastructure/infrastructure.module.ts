@@ -11,6 +11,7 @@ import { PostgresOutboxStore } from './outbox/postgres-outbox-store';
 import { OUTBOX_STORE } from './outbox/outbox-store.interface';
 import { OutboxPublisherService } from './outbox/outbox-publisher.service';
 import { AccountEventsConsumerService } from './projections/account-events-consumer.service';
+import { ProjectionAdminController } from './projections/projection-admin.controller';
 import { ProjectionRunnerService } from './projections/projection-runner.service';
 import { InMemorySnapshotStore } from './snapshots/in-memory-snapshot-store';
 import { PostgresSnapshotStore } from './snapshots/postgres-snapshot-store';
@@ -21,6 +22,7 @@ import { InMemoryAccountReadModelRepository } from '../modules/accounts/query/in
 import { PostgresAccountReadModelRepository } from '../modules/accounts/query/postgres-account-read-model.repository';
 
 @Module({
+  controllers: [ProjectionAdminController],
   providers: [
     ...databaseProviders,
     MigrationRunnerService,

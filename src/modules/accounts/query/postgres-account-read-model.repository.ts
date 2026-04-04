@@ -130,6 +130,35 @@ export class PostgresAccountReadModelRepository implements AccountReadModelRepos
     );
   }
 
+  async resetAccount(accountId: string): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('DELETE FROM account_statement WHERE account_id = $1', [accountId]);
+      await client.query('DELETE FROM account_summary WHERE account_id = $1', [accountId]);
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async resetAll(): Promise<void> {
+    const client = await this.pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query('TRUNCATE TABLE account_statement, account_summary, projection_checkpoints');
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
   async getCheckpoint(projectionName: string): Promise<number> {
     const result = await this.pool.query<{ position: string | number }>(
       `SELECT position FROM projection_checkpoints WHERE projection_name = $1`,

@@ -30,6 +30,8 @@ export interface AccountReadModelRepository {
   getAccountStatement(accountId: string, limit?: number, offset?: number): Promise<AccountStatementEntryReadModel[]>;
   upsertAccountSummary(summary: UpsertAccountSummaryInput): Promise<void>;
   appendAccountStatement(entry: AppendAccountStatementEntryInput): Promise<void>;
+  resetAccount(accountId: string): Promise<void>;
+  resetAll(): Promise<void>;
   getCheckpoint(projectionName: string): Promise<number>;
   saveCheckpoint(projectionName: string, position: number): Promise<void>;
 }

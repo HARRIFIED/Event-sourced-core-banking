@@ -5,6 +5,8 @@ import { AppendOptions, EventStore } from './event-store.interface';
 
 @Injectable()
 export class PostgresEventStore implements EventStore, OnModuleDestroy {
+  private isPoolClosed = false;
+
   constructor(@Inject('PG_POOL') private readonly pool: Pool) {}
 
   async append(streamId: string, events: DomainEvent[], options: AppendOptions): Promise<void> {
@@ -122,6 +124,11 @@ export class PostgresEventStore implements EventStore, OnModuleDestroy {
   }
 
   async onModuleDestroy(): Promise<void> {
+    if (this.isPoolClosed) {
+      return;
+    }
+
+    this.isPoolClosed = true;
     await this.pool.end();
   }
 

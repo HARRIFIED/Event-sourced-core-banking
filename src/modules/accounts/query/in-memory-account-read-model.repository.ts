@@ -44,6 +44,17 @@ export class InMemoryAccountReadModelRepository implements AccountReadModelRepos
     this.statements.set(entry.accountId, next);
   }
 
+  async resetAccount(accountId: string): Promise<void> {
+    this.summaries.delete(accountId);
+    this.statements.delete(accountId);
+  }
+
+  async resetAll(): Promise<void> {
+    this.summaries.clear();
+    this.statements.clear();
+    this.checkpoints.clear();
+  }
+
   async getCheckpoint(projectionName: string): Promise<number> {
     return this.checkpoints.get(projectionName) ?? 0;
   }

@@ -7,6 +7,15 @@ import {
   AccountSummaryReadModel,
 } from './account-read-model.repository';
 
+export class ProjectionGapError extends Error {
+  constructor(accountId: string, expectedVersion: number, actualVersion: number) {
+    super(
+      `Projection gap for account ${accountId}. Expected stream version ${expectedVersion}, received ${actualVersion}`,
+    );
+    this.name = 'ProjectionGapError';
+  }
+}
+
 @Injectable()
 export class AccountProjector {
   constructor(
@@ -40,6 +49,12 @@ export class AccountProjector {
     if (existing && existing.version >= event.streamVersion) {
       return;
     }
+    if (existing) {
+      throw new ProjectionGapError(accountId, existing.version + 1, event.streamVersion);
+    }
+    if (event.streamVersion !== 1) {
+      throw new ProjectionGapError(accountId, 1, event.streamVersion);
+    }
 
     await this.readModels.upsertAccountSummary({
       accountId,
@@ -67,6 +82,7 @@ export class AccountProjector {
     if (summary.version >= event.streamVersion) {
       return;
     }
+    this.ensureSequentialVersion(accountId, summary.version, event.streamVersion);
 
     const amount = Number(event.data.amount);
 
@@ -95,6 +111,7 @@ export class AccountProjector {
     if (summary.version >= event.streamVersion) {
       return;
     }
+    this.ensureSequentialVersion(accountId, summary.version, event.streamVersion);
 
     const amount = Number(event.data.amount);
 
@@ -123,6 +140,7 @@ export class AccountProjector {
     if (summary.version >= event.streamVersion) {
       return;
     }
+    this.ensureSequentialVersion(accountId, summary.version, event.streamVersion);
 
     await this.readModels.upsertAccountSummary({
       ...summary,
@@ -148,5 +166,12 @@ export class AccountProjector {
     }
 
     return summary;
+  }
+
+  private ensureSequentialVersion(accountId: string, currentVersion: number, incomingVersion: number): void {
+    const expectedNextVersion = currentVersion + 1;
+    if (incomingVersion !== expectedNextVersion) {
+      throw new ProjectionGapError(accountId, expectedNextVersion, incomingVersion);
+    }
   }
 }
