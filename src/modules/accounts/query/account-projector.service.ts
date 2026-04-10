@@ -49,9 +49,11 @@ export class AccountProjector {
     if (existing && existing.version >= event.streamVersion) {
       return;
     }
+    // For account creation events, we have stricter checks to prevent any potential gaps right at the start of the stream.
     if (existing) {
       throw new ProjectionGapError(accountId, existing.version + 1, event.streamVersion);
     }
+    // For account creation events, we expect the stream version to start at 1. 
     if (event.streamVersion !== 1) {
       throw new ProjectionGapError(accountId, 1, event.streamVersion);
     }

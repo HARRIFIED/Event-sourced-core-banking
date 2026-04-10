@@ -93,7 +93,7 @@ New live flow:
 
 1. write side appends event
 2. same transaction stages outbox row
-3. outbox publisher sends event to Kafka topic `account-events`
+3. outbox publisher working in background sends event to Kafka topic `account-events`
 4. Kafka consumer receives event
 5. `AccountProjector` updates `account_summary` and `account_statement`
 
@@ -124,14 +124,14 @@ New rule:
 
 If a later version arrives before the missing one, the projector now throws a `ProjectionGapError`.
 
-This is important because silently projecting version `7` while version `6` is missing can permanently corrupt read-side balances and statements.
+This is important because silently projecting version `7` while version `6` is missing can permanently corrupt read-side balances and statements with no warning or alerts.
 
 ### 6. Repair And Rebuild Tooling
 
 Projection rebuild support was added for both:
 
 - a single account
-- the full read model
+- the full read model (all accounts in the system)
 
 Rebuild entry points:
 
