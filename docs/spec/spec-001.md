@@ -120,3 +120,5 @@ At the end of this phase, the project had:
 - a replay-capable projection service
 
 This established the baseline architecture for later outbox, Kafka, and transfer-saga work.
+
+This phase did not yet include command idempotency. Commands were accepted as new work each time they arrived.

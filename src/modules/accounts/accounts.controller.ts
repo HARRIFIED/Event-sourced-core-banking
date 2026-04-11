@@ -1,6 +1,7 @@
-import { Body, Controller, DefaultValuePipe, Get, Inject, NotFoundException, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
+import { Body, Controller, DefaultValuePipe, Get, Headers, Inject, NotFoundException, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
 import { CommandBus } from '@nestjs/cqrs';
 import { randomUUID } from 'crypto';
+import { IdempotencyService } from '../../infrastructure/idempotency/idempotency.service';
 import {
   ACCOUNT_READ_MODEL_REPOSITORY,
   AccountReadModelRepository,
@@ -22,69 +23,104 @@ import { FreezeAccountCommand } from './application/commands/freeze-account.comm
 export class AccountsController {
   constructor(
     private readonly commandBus: CommandBus,
+    private readonly idempotencyService: IdempotencyService,
     @Inject(ACCOUNT_READ_MODEL_REPOSITORY)
     private readonly readModels: AccountReadModelRepository,
   ) {}
 
   @Post()
-  async createAccount(@Body() dto: CreateAccountDto): Promise<{ status: string }> {
-    await this.commandBus.execute(
-      new CreateAccountCommand(dto.accountId, dto.ownerId, dto.currency, {
-        commandId: randomUUID(),
-        correlationId: randomUUID(),
-        actor: dto.actor,
-      }),
-    );
+  async createAccount(
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
+    @Body() dto: CreateAccountDto,
+  ): Promise<{ status: string }> {
+    return this.idempotencyService.execute(
+      idempotencyKey,
+      'accounts.create',
+      dto,
+      async () => {
+        await this.commandBus.execute(
+          new CreateAccountCommand(dto.accountId, dto.ownerId, dto.currency, {
+            commandId: idempotencyKey!,
+            correlationId: randomUUID(),
+            actor: dto.actor,
+          }),
+        );
 
-    return { status: 'accepted' };
+        return { status: 'accepted' };
+      },
+    );
   }
 
   @Post(':accountId/deposits')
   async deposit(
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Param('accountId') accountId: string,
     @Body() dto: DepositMoneyDto,
   ): Promise<{ status: string }> {
-    await this.commandBus.execute(
-      new DepositMoneyCommand(accountId, dto.amount, dto.currency, {
-        commandId: randomUUID(),
-        correlationId: randomUUID(),
-        actor: dto.actor,
-      }, dto.transactionId),
-    );
+    return this.idempotencyService.execute(
+      idempotencyKey,
+      'accounts.deposit',
+      { accountId, ...dto },
+      async () => {
+        await this.commandBus.execute(
+          new DepositMoneyCommand(accountId, dto.amount, dto.currency, {
+            commandId: idempotencyKey!,
+            correlationId: randomUUID(),
+            actor: dto.actor,
+          }, dto.transactionId),
+        );
 
-    return { status: 'accepted' };
+        return { status: 'accepted' };
+      },
+    );
   }
 
   @Post(':accountId/withdrawals')
   async withdraw(
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Param('accountId') accountId: string,
     @Body() dto: WithdrawMoneyDto,
   ): Promise<{ status: string }> {
-    await this.commandBus.execute(
-      new WithdrawMoneyCommand(accountId, dto.amount, dto.currency, {
-        commandId: randomUUID(),
-        correlationId: randomUUID(),
-        actor: dto.actor,
-      }, dto.transactionId),
-    );
+    return this.idempotencyService.execute(
+      idempotencyKey,
+      'accounts.withdraw',
+      { accountId, ...dto },
+      async () => {
+        await this.commandBus.execute(
+          new WithdrawMoneyCommand(accountId, dto.amount, dto.currency, {
+            commandId: idempotencyKey!,
+            correlationId: randomUUID(),
+            actor: dto.actor,
+          }, dto.transactionId),
+        );
 
-    return { status: 'accepted' };
+        return { status: 'accepted' };
+      },
+    );
   }
 
   @Post(':accountId/freeze')
   async freeze(
+    @Headers('idempotency-key') idempotencyKey: string | undefined,
     @Param('accountId') accountId: string,
     @Body() dto: FreezeAccountDto,
   ): Promise<{ status: string }> {
-    await this.commandBus.execute(
-      new FreezeAccountCommand(accountId, dto.reason, {
-        commandId: randomUUID(),
-        correlationId: randomUUID(),
-        actor: dto.actor,
-      }),
-    );
+    return this.idempotencyService.execute(
+      idempotencyKey,
+      'accounts.freeze',
+      { accountId, ...dto },
+      async () => {
+        await this.commandBus.execute(
+          new FreezeAccountCommand(accountId, dto.reason, {
+            commandId: idempotencyKey!,
+            correlationId: randomUUID(),
+            actor: dto.actor,
+          }),
+        );
 
-    return { status: 'accepted' };
+        return { status: 'accepted' };
+      },
+    );
   }
 
   @Get(':accountId')

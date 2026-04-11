@@ -104,4 +104,20 @@ export const schemaMigrations: SqlMigration[] = [
         ON account_statement(account_id, stream_version);
     `,
   },
+  {
+    version: 5,
+    name: 'create-idempotency-records-table',
+    sql: `
+      CREATE TABLE IF NOT EXISTS idempotency_records (
+        idempotency_key VARCHAR(255) PRIMARY KEY,
+        operation VARCHAR(255) NOT NULL,
+        request_hash VARCHAR(255) NOT NULL,
+        status VARCHAR(32) NOT NULL,
+        response_payload JSONB NULL,
+        error_message TEXT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+    `,
+  },
 ];

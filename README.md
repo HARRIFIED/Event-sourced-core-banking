@@ -12,6 +12,7 @@ A NestJS learning project for building a realistic core banking or digital walle
 
 - Create, deposit into, withdraw from, and freeze accounts
 - Persist account changes as immutable domain events
+- Deduplicate account command retries with a Postgres-backed idempotency store
 - Rehydrate aggregates from event history, using snapshots every 100 versions
 - Maintain read models for account details, balances, and statement history
 - Publish persisted events through a transactional outbox
@@ -190,11 +191,16 @@ Health check:
 
 ## Account Command Endpoints
 
+All account command endpoints now require an `Idempotency-Key` header.
+
+Use one unique key per logical operation, and reuse the same key only when retrying that exact same request.
+
 Create account:
 
 ```bash
 curl -X POST http://localhost:3000/api/accounts \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 2d3c5e2f-54fc-42b1-98d0-65f5fd4d6448" \
   -d "{\"accountId\":\"acc-1\",\"ownerId\":\"user-1\",\"currency\":\"USD\"}"
 ```
 
@@ -203,6 +209,7 @@ Deposit money:
 ```bash
 curl -X POST http://localhost:3000/api/accounts/acc-1/deposits \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 4e8cb2bc-e8cf-4407-979d-b1e8ac25fe65" \
   -d "{\"amount\":1000,\"currency\":\"USD\",\"transactionId\":\"txn-1\"}"
 ```
 
@@ -211,6 +218,7 @@ Withdraw money:
 ```bash
 curl -X POST http://localhost:3000/api/accounts/acc-1/withdrawals \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: cbcf3754-2e55-4ab2-b788-0ef2bbac7776" \
   -d "{\"amount\":200,\"currency\":\"USD\",\"transactionId\":\"txn-2\"}"
 ```
 
@@ -219,6 +227,7 @@ Freeze account:
 ```bash
 curl -X POST http://localhost:3000/api/accounts/acc-1/freeze \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 197f5140-4516-4eb4-b10f-cf2cdfa4c906" \
   -d "{\"reason\":\"compliance review\"}"
 ```
 
@@ -350,6 +359,23 @@ Write endpoints return once the event is appended to the event store. Query endp
 - reads may lag briefly behind writes
 
 That tradeoff is intentional in CQRS systems.
+
+## Command Idempotency
+
+Account command endpoints use a Postgres-backed `idempotency_records` table.
+
+Behavior:
+
+- first request with a new `Idempotency-Key` is processed normally
+- retry with the same key and same payload returns the original success response
+- retry with the same key while the first request is still in progress returns a conflict
+- reusing the same key for a different payload returns a conflict
+
+Client guidance:
+
+- generate a UUID on the client for each logical command
+- reuse that exact UUID only when retrying the same request
+- do not generate a fresh key for retries, or the server will treat it as a new command
 
 ## Database And Migrations
 

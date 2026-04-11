@@ -5,6 +5,9 @@ import { MigrationRunnerService } from './db/migration-runner.service';
 import { EVENT_STORE } from './event-store/event-store.interface';
 import { InMemoryEventStore } from './event-store/in-memory-event-store';
 import { PostgresEventStore } from './event-store/postgres-event-store';
+import { IdempotencyService } from './idempotency/idempotency.service';
+import { IDEMPOTENCY_RECORD_REPOSITORY } from './idempotency/idempotency-record.repository';
+import { PostgresIdempotencyRecordRepository } from './idempotency/postgres-idempotency-record.repository';
 import { KafkaClient } from './messaging/kafka.client';
 import { InMemoryOutboxStore } from './outbox/in-memory-outbox-store';
 import { PostgresOutboxStore } from './outbox/postgres-outbox-store';
@@ -26,6 +29,8 @@ import { PostgresAccountReadModelRepository } from '../modules/accounts/query/po
   providers: [
     ...databaseProviders,
     MigrationRunnerService,
+    PostgresIdempotencyRecordRepository,
+    IdempotencyService,
     InMemoryEventStore,
     PostgresEventStore,
     InMemoryOutboxStore,
@@ -39,6 +44,10 @@ import { PostgresAccountReadModelRepository } from '../modules/accounts/query/po
     OutboxPublisherService,
     AccountEventsConsumerService,
     ProjectionRunnerService,
+    {
+      provide: IDEMPOTENCY_RECORD_REPOSITORY,
+      useExisting: PostgresIdempotencyRecordRepository,
+    },
     {
       provide: EVENT_STORE,
       inject: [ConfigService, InMemoryEventStore, PostgresEventStore],
@@ -93,6 +102,8 @@ import { PostgresAccountReadModelRepository } from '../modules/accounts/query/po
     OUTBOX_STORE,
     SNAPSHOT_STORE,
     ACCOUNT_READ_MODEL_REPOSITORY,
+    IDEMPOTENCY_RECORD_REPOSITORY,
+    IdempotencyService,
     KafkaClient,
     OutboxPublisherService,
     AccountEventsConsumerService,

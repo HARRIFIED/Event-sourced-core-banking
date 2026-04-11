@@ -160,3 +160,22 @@ At the end of this phase, the project now has:
 - repair endpoints and CLI rebuild tooling
 
 This makes the read side much more resilient and brings the project closer to a production-shaped asynchronous architecture, while still preserving direct replay from the event store when needed.
+
+## Follow-On Update: Command Idempotency
+
+After the outbox and Kafka live projection work, account command idempotency was added as a further hardening step.
+
+Problem:
+
+- client retries could still execute the same command twice
+- this was especially risky for deposits, withdrawals, and future transfers
+
+Solution implemented:
+
+- require an `Idempotency-Key` header on account command endpoints
+- store idempotency records in Postgres
+- reserve the key before command execution
+- return the previously stored response for duplicate completed requests
+- reject reuse of the same key with a different payload
+
+This moves duplicate-command protection to the application boundary and gives future transfer flows a safer foundation.

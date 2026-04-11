@@ -73,3 +73,14 @@ CREATE INDEX IF NOT EXISTS idx_outbox_events_pending_created_at
   ON outbox_events(published_at, created_at);
 CREATE INDEX IF NOT EXISTS idx_outbox_events_processing_started_at
   ON outbox_events(processing_started_at);
+
+CREATE TABLE IF NOT EXISTS idempotency_records (
+  idempotency_key VARCHAR(255) PRIMARY KEY,
+  operation VARCHAR(255) NOT NULL,
+  request_hash VARCHAR(255) NOT NULL,
+  status VARCHAR(32) NOT NULL,
+  response_payload JSONB NULL,
+  error_message TEXT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
