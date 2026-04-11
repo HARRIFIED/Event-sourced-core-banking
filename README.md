@@ -13,6 +13,7 @@ A NestJS learning project for building a realistic core banking or digital walle
 - Create, deposit into, withdraw from, and freeze accounts
 - Persist account changes as immutable domain events
 - Deduplicate account command retries with a Postgres-backed idempotency store
+- Guard deposit and withdrawal business transactions with a write-side transaction registry
 - Rehydrate aggregates from event history, using snapshots every 100 versions
 - Maintain read models for account details, balances, and statement history
 - Publish persisted events through a transactional outbox
@@ -149,6 +150,8 @@ In Postgres mode, the app uses:
 - `account_statement` for account history
 - `projection_checkpoints` for projection progress
 - `outbox_events` for reliable event publication
+- `idempotency_records` for API-level command deduplication
+- `transaction_records` for business transaction deduplication
 - `schema_migrations` for versioned SQL migrations
 
 ## Quickstart
@@ -377,6 +380,15 @@ Client guidance:
 - reuse that exact UUID only when retrying the same request
 - do not generate a fresh key for retries, or the server will treat it as a new command
 
+For deposits and withdrawals, the app also uses a Postgres-backed `transaction_records` table.
+
+That means:
+
+- `Idempotency-Key` protects the API request
+- `transactionId` protects the business money movement
+
+Even if a caller changes the `Idempotency-Key`, reusing the same `transactionId` for a deposit or withdrawal will not create a second business transaction.
+
 ## Database And Migrations
 
 This repo does not use an ORM.
@@ -424,7 +436,6 @@ Kafka broker values depend on where the app runs:
 
 - account query projections are currently the only implemented read models
 - transfer flow is still scaffolding rather than a full durable saga
-- no idempotency store for commands yet
 - no read-your-own-write strategy yet for query-after-command UX
 - rebuild/admin endpoints are not authenticated yet
 - Kafka-based live projections still need broader operational hardening such as monitoring, lag visibility, and richer failure handling
@@ -433,7 +444,6 @@ Kafka broker values depend on where the app runs:
 
 1. Add transfer status projection and query endpoint.
 2. Implement the durable transfer saga/process manager.
-3. Add command idempotency keyed by `commandId`.
-4. Add auth and audit logging for admin rebuild endpoints.
-5. Add monitoring for outbox lag, consumer lag, and projection failures.
-6. Add integration tests covering concurrency conflicts, projection gaps, and rebuild flows.
+3. Add auth and audit logging for admin rebuild endpoints.
+4. Add monitoring for outbox lag, consumer lag, and projection failures.
+5. Add integration tests covering concurrency conflicts, projection gaps, rebuild flows, and transaction/idempotency deduplication.

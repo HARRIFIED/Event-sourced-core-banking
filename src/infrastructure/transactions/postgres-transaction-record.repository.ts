@@ -1,0 +1,120 @@
+import { Inject, Injectable } from '@nestjs/common';
+import { Pool } from 'pg';
+import {
+  ReserveTransactionInput,
+  TransactionRecord,
+  TransactionRecordRepository,
+} from './transaction-record.repository';
+
+@Injectable()
+export class PostgresTransactionRecordRepository implements TransactionRecordRepository {
+  constructor(@Inject('PG_POOL') private readonly pool: Pool) {}
+
+  async reserve(input: ReserveTransactionInput): Promise<{ created: boolean; record: TransactionRecord | null }> {
+    const insertResult = await this.pool.query<{
+      transaction_id: string;
+      account_id: string;
+      operation_type: 'DEPOSIT' | 'WITHDRAW';
+      status: 'PENDING' | 'COMPLETED' | 'FAILED';
+      amount: string | number;
+      currency: string;
+      idempotency_key: string | null;
+      error_message: string | null;
+      created_at: Date;
+      updated_at: Date;
+    }>(
+      `INSERT INTO transaction_records (
+         transaction_id, account_id, operation_type, status, amount, currency, idempotency_key, created_at, updated_at
+       ) VALUES ($1, $2, $3, 'PENDING', $4, $5, $6, NOW(), NOW())
+       ON CONFLICT (transaction_id) DO NOTHING
+       RETURNING transaction_id, account_id, operation_type, status, amount, currency, idempotency_key, error_message, created_at, updated_at`,
+      [
+        input.transactionId,
+        input.accountId,
+        input.operationType,
+        input.amount,
+        input.currency,
+        input.idempotencyKey ?? null,
+      ],
+    );
+
+    const inserted = insertResult.rows[0];
+    if (inserted) {
+      return {
+        created: true,
+        record: this.mapRow(inserted),
+      };
+    }
+
+    const existingResult = await this.pool.query<{
+      transaction_id: string;
+      account_id: string;
+      operation_type: 'DEPOSIT' | 'WITHDRAW';
+      status: 'PENDING' | 'COMPLETED' | 'FAILED';
+      amount: string | number;
+      currency: string;
+      idempotency_key: string | null;
+      error_message: string | null;
+      created_at: Date;
+      updated_at: Date;
+    }>(
+      `SELECT transaction_id, account_id, operation_type, status, amount, currency, idempotency_key, error_message, created_at, updated_at
+       FROM transaction_records
+       WHERE transaction_id = $1`,
+      [input.transactionId],
+    );
+
+    return {
+      created: false,
+      record: existingResult.rows[0] ? this.mapRow(existingResult.rows[0]) : null,
+    };
+  }
+
+  async markCompleted(transactionId: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE transaction_records
+       SET status = 'COMPLETED',
+           error_message = NULL,
+           updated_at = NOW()
+       WHERE transaction_id = $1`,
+      [transactionId],
+    );
+  }
+
+  async markFailed(transactionId: string, errorMessage: string): Promise<void> {
+    await this.pool.query(
+      `UPDATE transaction_records
+       SET status = 'FAILED',
+           error_message = $2,
+           updated_at = NOW()
+       WHERE transaction_id = $1`,
+      [transactionId, errorMessage],
+    );
+  }
+
+  private mapRow(row: {
+    transaction_id: string;
+    account_id: string;
+    operation_type: 'DEPOSIT' | 'WITHDRAW';
+    status: 'PENDING' | 'COMPLETED' | 'FAILED';
+    amount: string | number;
+    currency: string;
+    idempotency_key: string | null;
+    error_message: string | null;
+    created_at: Date;
+    updated_at: Date;
+  }): TransactionRecord {
+    return {
+      transactionId: row.transaction_id,
+      accountId: row.account_id,
+      operationType: row.operation_type,
+      status: row.status,
+      amount: Number(row.amount),
+      currency: row.currency,
+      idempotencyKey: row.idempotency_key,
+      errorMessage: row.error_message,
+      createdAt: new Date(row.created_at).toISOString(),
+      updatedAt: new Date(row.updated_at).toISOString(),
+    };
+  }
+}

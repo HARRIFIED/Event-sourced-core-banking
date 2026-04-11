@@ -19,6 +19,9 @@ import { ProjectionRunnerService } from './projections/projection-runner.service
 import { InMemorySnapshotStore } from './snapshots/in-memory-snapshot-store';
 import { PostgresSnapshotStore } from './snapshots/postgres-snapshot-store';
 import { SNAPSHOT_STORE } from './snapshots/snapshot-store.interface';
+import { PostgresTransactionRecordRepository } from './transactions/postgres-transaction-record.repository';
+import { TransactionRegistryService } from './transactions/transaction-registry.service';
+import { TRANSACTION_RECORD_REPOSITORY } from './transactions/transaction-record.repository';
 import { AccountProjector } from '../modules/accounts/query/account-projector.service';
 import { ACCOUNT_READ_MODEL_REPOSITORY } from '../modules/accounts/query/account-read-model.repository';
 import { InMemoryAccountReadModelRepository } from '../modules/accounts/query/in-memory-account-read-model.repository';
@@ -31,6 +34,8 @@ import { PostgresAccountReadModelRepository } from '../modules/accounts/query/po
     MigrationRunnerService,
     PostgresIdempotencyRecordRepository,
     IdempotencyService,
+    PostgresTransactionRecordRepository,
+    TransactionRegistryService,
     InMemoryEventStore,
     PostgresEventStore,
     InMemoryOutboxStore,
@@ -47,6 +52,10 @@ import { PostgresAccountReadModelRepository } from '../modules/accounts/query/po
     {
       provide: IDEMPOTENCY_RECORD_REPOSITORY,
       useExisting: PostgresIdempotencyRecordRepository,
+    },
+    {
+      provide: TRANSACTION_RECORD_REPOSITORY,
+      useExisting: PostgresTransactionRecordRepository,
     },
     {
       provide: EVENT_STORE,
@@ -104,6 +113,8 @@ import { PostgresAccountReadModelRepository } from '../modules/accounts/query/po
     ACCOUNT_READ_MODEL_REPOSITORY,
     IDEMPOTENCY_RECORD_REPOSITORY,
     IdempotencyService,
+    TRANSACTION_RECORD_REPOSITORY,
+    TransactionRegistryService,
     KafkaClient,
     OutboxPublisherService,
     AccountEventsConsumerService,

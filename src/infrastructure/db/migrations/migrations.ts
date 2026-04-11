@@ -120,4 +120,25 @@ export const schemaMigrations: SqlMigration[] = [
       );
     `,
   },
+  {
+    version: 6,
+    name: 'create-transaction-records-table',
+    sql: `
+      CREATE TABLE IF NOT EXISTS transaction_records (
+        transaction_id VARCHAR(255) PRIMARY KEY,
+        account_id VARCHAR(255) NOT NULL,
+        operation_type VARCHAR(32) NOT NULL,
+        status VARCHAR(32) NOT NULL,
+        amount NUMERIC(19, 2) NOT NULL,
+        currency VARCHAR(16) NOT NULL,
+        idempotency_key VARCHAR(255) NULL,
+        error_message TEXT NULL,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_transaction_records_account_id
+        ON transaction_records(account_id);
+    `,
+  },
 ];

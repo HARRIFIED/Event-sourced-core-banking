@@ -179,3 +179,26 @@ Solution implemented:
 - reject reuse of the same key with a different payload
 
 This moves duplicate-command protection to the application boundary and gives future transfer flows a safer foundation.
+
+## Follow-On Update: Write-Side Transaction Registry
+
+After adding API-level idempotency, deposit and withdrawal flows were further hardened with a write-side transaction registry.
+
+Problem:
+
+- `Idempotency-Key` protects request retries
+- but a caller could still submit a new request with a different idempotency key and reuse the same `transactionId`
+- without a business-level guard, the same money movement could still be applied twice
+
+Solution implemented:
+
+- add a `transaction_records` table in Postgres
+- reserve a transaction record before executing deposit or withdrawal commands
+- store `transaction_id`, `account_id`, `operation_type`, `status`, `amount`, `currency`, and `idempotency_key`
+- mark the transaction `COMPLETED` or `FAILED` after command execution
+- reject reuse of the same `transactionId` for a different money movement
+
+This gives deposits and withdrawals two layers of protection:
+
+- `Idempotency-Key` for API request deduplication
+- `transactionId` for business transaction deduplication

@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
 import { createHash } from 'crypto';
 import {
   IDEMPOTENCY_RECORD_REPOSITORY,
@@ -7,6 +7,7 @@ import {
 
 @Injectable()
 export class IdempotencyService {
+  private readonly logger = new Logger(IdempotencyService.name);
   constructor(
     @Inject(IDEMPOTENCY_RECORD_REPOSITORY)
     private readonly repository: IdempotencyRecordRepository,
@@ -31,21 +32,32 @@ export class IdempotencyService {
 
     if (!created && record) {
       if (record.operation !== operation || record.requestHash !== requestHash) {
+        this.logger.error(
+          `Idempotency key ${idempotencyKey} has already been used for a different request. Existing operation: ${record.operation}, incoming operation: ${operation}`,
+        );
         throw new ConflictException(
           `Idempotency key ${idempotencyKey} has already been used for a different request`,
         );
       }
 
       if (record.status === 'COMPLETED' && record.responsePayload) {
+        this.logger.warn(
+          `Idempotent request with key ${idempotencyKey} has already been completed. Returning cached response.`,
+        );
         return record.responsePayload as TResponse;
       }
 
       if (record.status === 'IN_PROGRESS') {
+          this.logger.warn(
+          `Request with Idempotency-Key ${idempotencyKey} is already in progress. Rejecting duplicate request.`,
+        );
         throw new ConflictException(
           `Request with Idempotency-Key ${idempotencyKey} is already in progress`,
         );
       }
-
+      this.logger.error(
+        `Request with Idempotency-Key ${idempotencyKey} previously failed with error: ${record.errorMessage}. Rejecting retry attempt.`,
+      );
       throw new ConflictException(
         `Request with Idempotency-Key ${idempotencyKey} previously failed. Retry with a new key.`,
       );

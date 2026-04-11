@@ -2,6 +2,7 @@ import { Body, Controller, DefaultValuePipe, Get, Headers, Inject, NotFoundExcep
 import { CommandBus } from '@nestjs/cqrs';
 import { randomUUID } from 'crypto';
 import { IdempotencyService } from '../../infrastructure/idempotency/idempotency.service';
+import { TransactionRegistryService } from '../../infrastructure/transactions/transaction-registry.service';
 import {
   ACCOUNT_READ_MODEL_REPOSITORY,
   AccountReadModelRepository,
@@ -24,6 +25,7 @@ export class AccountsController {
   constructor(
     private readonly commandBus: CommandBus,
     private readonly idempotencyService: IdempotencyService,
+    private readonly transactionRegistry: TransactionRegistryService,
     @Inject(ACCOUNT_READ_MODEL_REPOSITORY)
     private readonly readModels: AccountReadModelRepository,
   ) {}
@@ -61,17 +63,28 @@ export class AccountsController {
       idempotencyKey,
       'accounts.deposit',
       { accountId, ...dto },
-      async () => {
-        await this.commandBus.execute(
-          new DepositMoneyCommand(accountId, dto.amount, dto.currency, {
-            commandId: idempotencyKey!,
-            correlationId: randomUUID(),
-            actor: dto.actor,
-          }, dto.transactionId),
-        );
+      async () =>
+        this.transactionRegistry.execute(
+          {
+            transactionId: dto.transactionId,
+            accountId,
+            operationType: 'DEPOSIT',
+            amount: dto.amount,
+            currency: dto.currency,
+            idempotencyKey: idempotencyKey ?? null,
+          },
+          async () => {
+            await this.commandBus.execute(
+              new DepositMoneyCommand(accountId, dto.amount, dto.currency, {
+                commandId: idempotencyKey!,
+                correlationId: randomUUID(),
+                actor: dto.actor,
+              }, dto.transactionId),
+            );
 
-        return { status: 'accepted' };
-      },
+            return { status: 'accepted' };
+          },
+        ),
     );
   }
 
@@ -85,17 +98,28 @@ export class AccountsController {
       idempotencyKey,
       'accounts.withdraw',
       { accountId, ...dto },
-      async () => {
-        await this.commandBus.execute(
-          new WithdrawMoneyCommand(accountId, dto.amount, dto.currency, {
-            commandId: idempotencyKey!,
-            correlationId: randomUUID(),
-            actor: dto.actor,
-          }, dto.transactionId),
-        );
+      async () =>
+        this.transactionRegistry.execute(
+          {
+            transactionId: dto.transactionId,
+            accountId,
+            operationType: 'WITHDRAW',
+            amount: dto.amount,
+            currency: dto.currency,
+            idempotencyKey: idempotencyKey ?? null,
+          },
+          async () => {
+            await this.commandBus.execute(
+              new WithdrawMoneyCommand(accountId, dto.amount, dto.currency, {
+                commandId: idempotencyKey!,
+                correlationId: randomUUID(),
+                actor: dto.actor,
+              }, dto.transactionId),
+            );
 
-        return { status: 'accepted' };
-      },
+            return { status: 'accepted' };
+          },
+        ),
     );
   }
 
