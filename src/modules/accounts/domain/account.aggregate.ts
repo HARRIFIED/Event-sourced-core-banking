@@ -2,6 +2,7 @@ import { randomUUID } from 'crypto';
 import { AggregateRoot } from '../../../common/domain/aggregate-root';
 import { CommandContext } from '../../../common/cqrs/command-context';
 import { DomainEvent } from '../../../common/domain/domain-event';
+import { formatMinorUnitsToMoney, parseMoneyToMinorUnits } from '../../../common/money/money';
 import { AccountEventTypes } from '../application/events/account.events';
 import { BadRequestException } from '@nestjs/common';
 
@@ -10,7 +11,7 @@ export interface AccountSnapshotState {
   ownerId: string;
   currency: string;
   status: 'ACTIVE' | 'FROZEN';
-  balance: number;
+  balanceMinorUnits: string;
 }
 export class AccountAggregate extends AggregateRoot {
   //current account state
@@ -18,7 +19,7 @@ export class AccountAggregate extends AggregateRoot {
   ownerId!: string;
   currency!: string;
   status: 'ACTIVE' | 'FROZEN' = 'ACTIVE';
-  balance = 0;
+  balanceMinorUnits = 0n;
   version = 0;
 
   create(accountId: string, ownerId: string, currency: string, context: CommandContext): void {
@@ -35,31 +36,33 @@ export class AccountAggregate extends AggregateRoot {
     );
   }
 
-  deposit(amount: number, currency: string, transactionId: string, context: CommandContext): void {
+  deposit(amount: number | string, currency: string, transactionId: string, context: CommandContext): void {
     this.ensureActive();
     this.ensureCurrency(currency);
-    if (amount <= 0) throw new BadRequestException('Deposit amount must be positive');
+    const amountMinorUnits = parseMoneyToMinorUnits(amount);
+    if (amountMinorUnits <= 0n) throw new BadRequestException('Deposit amount must be positive');
 
     this.apply(
       this.makeEvent(AccountEventTypes.MoneyDeposited, {
         accountId: this.accountId,
-        amount,
+        amount: formatMinorUnitsToMoney(amountMinorUnits),
         currency,
         transactionId,
       }, context, `account-${this.accountId}`),
     );
   }
 
-  withdraw(amount: number, currency: string, transactionId: string, context: CommandContext): void {
+  withdraw(amount: number | string, currency: string, transactionId: string, context: CommandContext): void {
     this.ensureActive();
     this.ensureCurrency(currency);
-    if (amount <= 0) throw new BadRequestException('Withdraw amount must be positive');
-    if (this.balance < amount) throw new BadRequestException('Insufficient funds');
+    const amountMinorUnits = parseMoneyToMinorUnits(amount);
+    if (amountMinorUnits <= 0n) throw new BadRequestException('Withdraw amount must be positive');
+    if (this.balanceMinorUnits < amountMinorUnits) throw new BadRequestException('Insufficient funds');
 
     this.apply(
       this.makeEvent(AccountEventTypes.MoneyWithdrawn, {
         accountId: this.accountId,
-        amount,
+        amount: formatMinorUnitsToMoney(amountMinorUnits),
         currency,
         transactionId,
       }, context, `account-${this.accountId}`),
@@ -84,7 +87,7 @@ export class AccountAggregate extends AggregateRoot {
       ownerId: this.ownerId,
       currency: this.currency,
       status: this.status,
-      balance: this.balance,
+      balanceMinorUnits: this.balanceMinorUnits.toString(),
     };
   }
 
@@ -93,7 +96,7 @@ export class AccountAggregate extends AggregateRoot {
     this.ownerId = state.ownerId;
     this.currency = state.currency;
     this.status = state.status;
-    this.balance = state.balance;
+    this.balanceMinorUnits = BigInt(state.balanceMinorUnits);
     this.version = version;
   }
   
@@ -108,10 +111,10 @@ export class AccountAggregate extends AggregateRoot {
         this.status = 'ACTIVE';
         break;
       case AccountEventTypes.MoneyDeposited:
-        this.balance += Number(event.data.amount);
+        this.balanceMinorUnits += parseMoneyToMinorUnits(event.data.amount as string);
         break;
       case AccountEventTypes.MoneyWithdrawn:
-        this.balance -= Number(event.data.amount);
+        this.balanceMinorUnits -= parseMoneyToMinorUnits(event.data.amount as string);
         break;
       case AccountEventTypes.AccountFrozen:
         this.status = 'FROZEN';
@@ -119,6 +122,10 @@ export class AccountAggregate extends AggregateRoot {
       default:
         break;
     }
+  }
+
+  get balance(): number {
+    return Number(formatMinorUnitsToMoney(this.balanceMinorUnits));
   }
 
   private ensureCurrency(currency: string): void {

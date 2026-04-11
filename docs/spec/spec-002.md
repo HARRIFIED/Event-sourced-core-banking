@@ -93,7 +93,7 @@ New live flow:
 
 1. write side appends event
 2. same transaction stages outbox row
-3. outbox publisher sends event to Kafka topic `account-events`
+3. outbox publisher working in background sends event to Kafka topic `account-events`
 4. Kafka consumer receives event
 5. `AccountProjector` updates `account_summary` and `account_statement`
 
@@ -124,14 +124,14 @@ New rule:
 
 If a later version arrives before the missing one, the projector now throws a `ProjectionGapError`.
 
-This is important because silently projecting version `7` while version `6` is missing can permanently corrupt read-side balances and statements.
+This is important because silently projecting version `7` while version `6` is missing can permanently corrupt read-side balances and statements with no warning or alerts.
 
 ### 6. Repair And Rebuild Tooling
 
 Projection rebuild support was added for both:
 
 - a single account
-- the full read model
+- the full read model (all accounts in the system)
 
 Rebuild entry points:
 
@@ -160,3 +160,45 @@ At the end of this phase, the project now has:
 - repair endpoints and CLI rebuild tooling
 
 This makes the read side much more resilient and brings the project closer to a production-shaped asynchronous architecture, while still preserving direct replay from the event store when needed.
+
+## Follow-On Update: Command Idempotency
+
+After the outbox and Kafka live projection work, account command idempotency was added as a further hardening step.
+
+Problem:
+
+- client retries could still execute the same command twice
+- this was especially risky for deposits, withdrawals, and future transfers
+
+Solution implemented:
+
+- require an `Idempotency-Key` header on account command endpoints
+- store idempotency records in Postgres
+- reserve the key before command execution
+- return the previously stored response for duplicate completed requests
+- reject reuse of the same key with a different payload
+
+This moves duplicate-command protection to the application boundary and gives future transfer flows a safer foundation.
+
+## Follow-On Update: Write-Side Transaction Registry
+
+After adding API-level idempotency, deposit and withdrawal flows were further hardened with a write-side transaction registry.
+
+Problem:
+
+- `Idempotency-Key` protects request retries
+- but a caller could still submit a new request with a different idempotency key and reuse the same `transactionId`
+- without a business-level guard, the same money movement could still be applied twice
+
+Solution implemented:
+
+- add a `transaction_records` table in Postgres
+- reserve a transaction record before executing deposit or withdrawal commands
+- store `transaction_id`, `account_id`, `operation_type`, `status`, `amount`, `currency`, and `idempotency_key`
+- mark the transaction `COMPLETED` or `FAILED` after command execution
+- reject reuse of the same `transactionId` for a different money movement
+
+This gives deposits and withdrawals two layers of protection:
+
+- `Idempotency-Key` for API request deduplication
+- `transactionId` for business transaction deduplication

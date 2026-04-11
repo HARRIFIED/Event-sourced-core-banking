@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Pool } from 'pg';
+import { parseMoneyToMinorUnits, minorUnitsToNumber } from '../../../common/money/money';
 import {
   AccountReadModelRepository,
   AccountStatementEntryReadModel,
@@ -19,11 +20,19 @@ export class PostgresAccountReadModelRepository implements AccountReadModelRepos
       currency: string;
       status: 'ACTIVE' | 'FROZEN';
       balance: string | number;
+      balance_minor_units: string;
+      resolved_balance_minor_units: string;
       version: number;
       created_at: Date;
       updated_at: Date;
     }>(
-      `SELECT account_id, owner_id, currency, status, balance, version, created_at, updated_at
+      `SELECT account_id, owner_id, currency, status, balance, balance_minor_units,
+              CASE
+                WHEN balance_minor_units IS NULL OR (balance_minor_units = '0' AND balance <> 0)
+                  THEN ((balance * 100)::bigint)::text
+                ELSE balance_minor_units
+              END AS resolved_balance_minor_units,
+              version, created_at, updated_at
        FROM account_summary
        WHERE account_id = $1`,
       [accountId],
@@ -39,7 +48,8 @@ export class PostgresAccountReadModelRepository implements AccountReadModelRepos
       ownerId: row.owner_id,
       currency: row.currency,
       status: row.status,
-      balance: Number(row.balance),
+      balanceMinorUnits: row.resolved_balance_minor_units,
+      balance: minorUnitsToNumber(BigInt(row.resolved_balance_minor_units)),
       version: Number(row.version),
       createdAt: new Date(row.created_at).toISOString(),
       updatedAt: new Date(row.updated_at).toISOString(),
@@ -57,12 +67,20 @@ export class PostgresAccountReadModelRepository implements AccountReadModelRepos
       stream_version: number;
       event_type: string;
       amount: string | number | null;
+      amount_minor_units: string | null;
+      resolved_amount_minor_units: string | null;
       currency: string | null;
       transaction_id: string | null;
       reason: string | null;
       occurred_at: Date;
     }>(
-      `SELECT event_id, account_id, stream_version, event_type, amount, currency, transaction_id, reason, occurred_at
+      `SELECT event_id, account_id, stream_version, event_type, amount, amount_minor_units,
+              CASE
+                WHEN amount_minor_units IS NULL AND amount IS NOT NULL
+                  THEN ((amount * 100)::bigint)::text
+                ELSE amount_minor_units
+              END AS resolved_amount_minor_units,
+              currency, transaction_id, reason, occurred_at
        FROM account_statement
        WHERE account_id = $1
        ORDER BY stream_version ASC
@@ -75,7 +93,8 @@ export class PostgresAccountReadModelRepository implements AccountReadModelRepos
       accountId: row.account_id,
       streamVersion: Number(row.stream_version),
       eventType: row.event_type,
-      amount: row.amount === null ? undefined : Number(row.amount),
+      amountMinorUnits: row.resolved_amount_minor_units ?? undefined,
+      amount: row.resolved_amount_minor_units === null ? undefined : minorUnitsToNumber(BigInt(row.resolved_amount_minor_units)),
       currency: row.currency ?? undefined,
       transactionId: row.transaction_id ?? undefined,
       reason: row.reason ?? undefined,
@@ -86,13 +105,14 @@ export class PostgresAccountReadModelRepository implements AccountReadModelRepos
   async upsertAccountSummary(summary: UpsertAccountSummaryInput): Promise<void> {
     await this.pool.query(
       `INSERT INTO account_summary (
-         account_id, owner_id, currency, status, balance, version, created_at, updated_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7::timestamptz, $8::timestamptz)
+         account_id, owner_id, currency, status, balance, balance_minor_units, version, created_at, updated_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8::timestamptz, $9::timestamptz)
        ON CONFLICT (account_id) DO UPDATE
        SET owner_id = EXCLUDED.owner_id,
            currency = EXCLUDED.currency,
            status = EXCLUDED.status,
            balance = EXCLUDED.balance,
+           balance_minor_units = EXCLUDED.balance_minor_units,
            version = EXCLUDED.version,
            created_at = EXCLUDED.created_at,
            updated_at = EXCLUDED.updated_at
@@ -103,6 +123,7 @@ export class PostgresAccountReadModelRepository implements AccountReadModelRepos
         summary.currency,
         summary.status,
         summary.balance,
+        summary.balanceMinorUnits,
         summary.version,
         summary.createdAt,
         summary.updatedAt,
@@ -113,8 +134,8 @@ export class PostgresAccountReadModelRepository implements AccountReadModelRepos
   async appendAccountStatement(entry: AppendAccountStatementEntryInput): Promise<void> {
     await this.pool.query(
       `INSERT INTO account_statement (
-         event_id, account_id, stream_version, event_type, amount, currency, transaction_id, reason, occurred_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::timestamptz)
+         event_id, account_id, stream_version, event_type, amount, amount_minor_units, currency, transaction_id, reason, occurred_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamptz)
        ON CONFLICT (event_id) DO NOTHING`,
       [
         entry.eventId,
@@ -122,6 +143,7 @@ export class PostgresAccountReadModelRepository implements AccountReadModelRepos
         entry.streamVersion,
         entry.eventType,
         entry.amount ?? null,
+        entry.amountMinorUnits ?? (entry.amount === undefined ? null : parseMoneyToMinorUnits(entry.amount).toString()),
         entry.currency ?? null,
         entry.transactionId ?? null,
         entry.reason ?? null,

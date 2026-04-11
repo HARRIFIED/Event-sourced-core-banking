@@ -12,6 +12,8 @@ A NestJS learning project for building a realistic core banking or digital walle
 
 - Create, deposit into, withdraw from, and freeze accounts
 - Persist account changes as immutable domain events
+- Deduplicate account command retries with a Postgres-backed idempotency store
+- Guard deposit and withdrawal business transactions with a write-side transaction registry
 - Rehydrate aggregates from event history, using snapshots every 100 versions
 - Maintain read models for account details, balances, and statement history
 - Publish persisted events through a transactional outbox
@@ -148,6 +150,8 @@ In Postgres mode, the app uses:
 - `account_statement` for account history
 - `projection_checkpoints` for projection progress
 - `outbox_events` for reliable event publication
+- `idempotency_records` for API-level command deduplication
+- `transaction_records` for business transaction deduplication
 - `schema_migrations` for versioned SQL migrations
 
 ## Quickstart
@@ -190,11 +194,16 @@ Health check:
 
 ## Account Command Endpoints
 
+All account command endpoints now require an `Idempotency-Key` header.
+
+Use one unique key per logical operation, and reuse the same key only when retrying that exact same request.
+
 Create account:
 
 ```bash
 curl -X POST http://localhost:3000/api/accounts \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 2d3c5e2f-54fc-42b1-98d0-65f5fd4d6448" \
   -d "{\"accountId\":\"acc-1\",\"ownerId\":\"user-1\",\"currency\":\"USD\"}"
 ```
 
@@ -203,6 +212,7 @@ Deposit money:
 ```bash
 curl -X POST http://localhost:3000/api/accounts/acc-1/deposits \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 4e8cb2bc-e8cf-4407-979d-b1e8ac25fe65" \
   -d "{\"amount\":1000,\"currency\":\"USD\",\"transactionId\":\"txn-1\"}"
 ```
 
@@ -211,6 +221,7 @@ Withdraw money:
 ```bash
 curl -X POST http://localhost:3000/api/accounts/acc-1/withdrawals \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: cbcf3754-2e55-4ab2-b788-0ef2bbac7776" \
   -d "{\"amount\":200,\"currency\":\"USD\",\"transactionId\":\"txn-2\"}"
 ```
 
@@ -219,6 +230,7 @@ Freeze account:
 ```bash
 curl -X POST http://localhost:3000/api/accounts/acc-1/freeze \
   -H "Content-Type: application/json" \
+  -H "Idempotency-Key: 197f5140-4516-4eb4-b10f-cf2cdfa4c906" \
   -d "{\"reason\":\"compliance review\"}"
 ```
 
@@ -351,6 +363,32 @@ Write endpoints return once the event is appended to the event store. Query endp
 
 That tradeoff is intentional in CQRS systems.
 
+## Command Idempotency
+
+Account command endpoints use a Postgres-backed `idempotency_records` table.
+
+Behavior:
+
+- first request with a new `Idempotency-Key` is processed normally
+- retry with the same key and same payload returns the original success response
+- retry with the same key while the first request is still in progress returns a conflict
+- reusing the same key for a different payload returns a conflict
+
+Client guidance:
+
+- generate a UUID on the client for each logical command
+- reuse that exact UUID only when retrying the same request
+- do not generate a fresh key for retries, or the server will treat it as a new command
+
+For deposits and withdrawals, the app also uses a Postgres-backed `transaction_records` table.
+
+That means:
+
+- `Idempotency-Key` protects the API request
+- `transactionId` protects the business money movement
+
+Even if a caller changes the `Idempotency-Key`, reusing the same `transactionId` for a deposit or withdrawal will not create a second business transaction.
+
 ## Database And Migrations
 
 This repo does not use an ORM.
@@ -398,7 +436,6 @@ Kafka broker values depend on where the app runs:
 
 - account query projections are currently the only implemented read models
 - transfer flow is still scaffolding rather than a full durable saga
-- no idempotency store for commands yet
 - no read-your-own-write strategy yet for query-after-command UX
 - rebuild/admin endpoints are not authenticated yet
 - Kafka-based live projections still need broader operational hardening such as monitoring, lag visibility, and richer failure handling
@@ -407,7 +444,6 @@ Kafka broker values depend on where the app runs:
 
 1. Add transfer status projection and query endpoint.
 2. Implement the durable transfer saga/process manager.
-3. Add command idempotency keyed by `commandId`.
-4. Add auth and audit logging for admin rebuild endpoints.
-5. Add monitoring for outbox lag, consumer lag, and projection failures.
-6. Add integration tests covering concurrency conflicts, projection gaps, and rebuild flows.
+3. Add auth and audit logging for admin rebuild endpoints.
+4. Add monitoring for outbox lag, consumer lag, and projection failures.
+5. Add integration tests covering concurrency conflicts, projection gaps, rebuild flows, and transaction/idempotency deduplication.
