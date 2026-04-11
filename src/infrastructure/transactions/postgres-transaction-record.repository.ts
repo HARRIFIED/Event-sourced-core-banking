@@ -1,5 +1,6 @@
 import { Inject, Injectable } from '@nestjs/common';
 import { Pool } from 'pg';
+import { minorUnitsToNumber, parseMoneyToMinorUnits } from '../../common/money/money';
 import {
   ReserveTransactionInput,
   TransactionRecord,
@@ -11,11 +12,13 @@ export class PostgresTransactionRecordRepository implements TransactionRecordRep
   constructor(@Inject('PG_POOL') private readonly pool: Pool) {}
 
   async reserve(input: ReserveTransactionInput): Promise<{ created: boolean; record: TransactionRecord | null }> {
+    const amountMinorUnits = parseMoneyToMinorUnits(input.amount);
     const insertResult = await this.pool.query<{
       transaction_id: string;
       account_id: string;
       operation_type: 'DEPOSIT' | 'WITHDRAW';
       status: 'PENDING' | 'COMPLETED' | 'FAILED';
+      amount_minor_units: string;
       amount: string | number;
       currency: string;
       idempotency_key: string | null;
@@ -24,15 +27,16 @@ export class PostgresTransactionRecordRepository implements TransactionRecordRep
       updated_at: Date;
     }>(
       `INSERT INTO transaction_records (
-         transaction_id, account_id, operation_type, status, amount, currency, idempotency_key, created_at, updated_at
-       ) VALUES ($1, $2, $3, 'PENDING', $4, $5, $6, NOW(), NOW())
+         transaction_id, account_id, operation_type, status, amount, amount_minor_units, currency, idempotency_key, created_at, updated_at
+       ) VALUES ($1, $2, $3, 'PENDING', $4, $5, $6, $7, NOW(), NOW())
        ON CONFLICT (transaction_id) DO NOTHING
-       RETURNING transaction_id, account_id, operation_type, status, amount, currency, idempotency_key, error_message, created_at, updated_at`,
+       RETURNING transaction_id, account_id, operation_type, status, amount_minor_units, amount, currency, idempotency_key, error_message, created_at, updated_at`,
       [
         input.transactionId,
         input.accountId,
         input.operationType,
-        input.amount,
+        minorUnitsToNumber(amountMinorUnits),
+        amountMinorUnits.toString(),
         input.currency,
         input.idempotencyKey ?? null,
       ],
@@ -51,6 +55,7 @@ export class PostgresTransactionRecordRepository implements TransactionRecordRep
       account_id: string;
       operation_type: 'DEPOSIT' | 'WITHDRAW';
       status: 'PENDING' | 'COMPLETED' | 'FAILED';
+      amount_minor_units: string;
       amount: string | number;
       currency: string;
       idempotency_key: string | null;
@@ -58,7 +63,7 @@ export class PostgresTransactionRecordRepository implements TransactionRecordRep
       created_at: Date;
       updated_at: Date;
     }>(
-      `SELECT transaction_id, account_id, operation_type, status, amount, currency, idempotency_key, error_message, created_at, updated_at
+      `SELECT transaction_id, account_id, operation_type, status, amount_minor_units, amount, currency, idempotency_key, error_message, created_at, updated_at
        FROM transaction_records
        WHERE transaction_id = $1`,
       [input.transactionId],
@@ -97,6 +102,7 @@ export class PostgresTransactionRecordRepository implements TransactionRecordRep
     account_id: string;
     operation_type: 'DEPOSIT' | 'WITHDRAW';
     status: 'PENDING' | 'COMPLETED' | 'FAILED';
+    amount_minor_units: string;
     amount: string | number;
     currency: string;
     idempotency_key: string | null;
@@ -109,7 +115,8 @@ export class PostgresTransactionRecordRepository implements TransactionRecordRep
       accountId: row.account_id,
       operationType: row.operation_type,
       status: row.status,
-      amount: Number(row.amount),
+      amountMinorUnits: row.amount_minor_units,
+      amount: minorUnitsToNumber(BigInt(row.amount_minor_units)),
       currency: row.currency,
       idempotencyKey: row.idempotency_key,
       errorMessage: row.error_message,

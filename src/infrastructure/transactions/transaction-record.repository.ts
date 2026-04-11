@@ -6,6 +6,7 @@ export interface TransactionRecord {
   accountId: string;
   operationType: TransactionOperationType;
   status: TransactionRecordStatus;
+  amountMinorUnits: string;
   amount: number;
   currency: string;
   idempotencyKey?: string | null;
@@ -18,7 +19,7 @@ export interface ReserveTransactionInput {
   transactionId: string;
   accountId: string;
   operationType: TransactionOperationType;
-  amount: number;
+  amount: number | string;
   currency: string;
   idempotencyKey?: string | null;
 }

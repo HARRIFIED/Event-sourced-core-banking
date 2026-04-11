@@ -1,4 +1,5 @@
 import { Inject, Injectable } from '@nestjs/common';
+import { parseMoneyToMinorUnits, minorUnitsToNumber } from '../../../common/money/money';
 import { DomainEvent } from '../../../common/domain/domain-event';
 import { AccountEventTypes } from '../application/events/account.events';
 import {
@@ -63,6 +64,7 @@ export class AccountProjector {
       ownerId: event.data.ownerId as string,
       currency: event.data.currency as string,
       status: 'ACTIVE',
+      balanceMinorUnits: '0',
       balance: 0,
       version: event.streamVersion,
       createdAt: occurredAt,
@@ -86,11 +88,13 @@ export class AccountProjector {
     }
     this.ensureSequentialVersion(accountId, summary.version, event.streamVersion);
 
-    const amount = Number(event.data.amount);
+    const amountMinorUnits = parseMoneyToMinorUnits(event.data.amount as string);
+    const nextBalanceMinorUnits = BigInt(summary.balanceMinorUnits) + amountMinorUnits;
 
     await this.readModels.upsertAccountSummary({
       ...summary,
-      balance: summary.balance + amount,
+      balanceMinorUnits: nextBalanceMinorUnits.toString(),
+      balance: minorUnitsToNumber(nextBalanceMinorUnits),
       version: event.streamVersion,
       updatedAt: event.occurredAt,
     });
@@ -100,7 +104,8 @@ export class AccountProjector {
       accountId,
       streamVersion: event.streamVersion,
       eventType: event.eventType,
-      amount,
+      amountMinorUnits: amountMinorUnits.toString(),
+      amount: minorUnitsToNumber(amountMinorUnits),
       currency: event.data.currency as string,
       transactionId: event.data.transactionId as string,
       occurredAt: event.occurredAt,
@@ -115,11 +120,13 @@ export class AccountProjector {
     }
     this.ensureSequentialVersion(accountId, summary.version, event.streamVersion);
 
-    const amount = Number(event.data.amount);
+    const amountMinorUnits = parseMoneyToMinorUnits(event.data.amount as string);
+    const nextBalanceMinorUnits = BigInt(summary.balanceMinorUnits) - amountMinorUnits;
 
     await this.readModels.upsertAccountSummary({
       ...summary,
-      balance: summary.balance - amount,
+      balanceMinorUnits: nextBalanceMinorUnits.toString(),
+      balance: minorUnitsToNumber(nextBalanceMinorUnits),
       version: event.streamVersion,
       updatedAt: event.occurredAt,
     });
@@ -129,7 +136,8 @@ export class AccountProjector {
       accountId,
       streamVersion: event.streamVersion,
       eventType: event.eventType,
-      amount,
+      amountMinorUnits: amountMinorUnits.toString(),
+      amount: minorUnitsToNumber(amountMinorUnits),
       currency: event.data.currency as string,
       transactionId: event.data.transactionId as string,
       occurredAt: event.occurredAt,

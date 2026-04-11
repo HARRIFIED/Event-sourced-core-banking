@@ -31,6 +31,7 @@ CREATE TABLE IF NOT EXISTS account_summary (
   currency VARCHAR(16) NOT NULL,
   status VARCHAR(32) NOT NULL,
   balance NUMERIC(19, 2) NOT NULL,
+  balance_minor_units VARCHAR(255) NOT NULL DEFAULT '0',
   version INT NOT NULL,
   created_at TIMESTAMPTZ NOT NULL,
   updated_at TIMESTAMPTZ NOT NULL
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS account_statement (
   stream_version INT NOT NULL,
   event_type VARCHAR(255) NOT NULL,
   amount NUMERIC(19, 2),
+  amount_minor_units VARCHAR(255),
   currency VARCHAR(16),
   transaction_id VARCHAR(255),
   reason TEXT,
@@ -91,6 +93,7 @@ CREATE TABLE IF NOT EXISTS transaction_records (
   operation_type VARCHAR(32) NOT NULL,
   status VARCHAR(32) NOT NULL,
   amount NUMERIC(19, 2) NOT NULL,
+  amount_minor_units VARCHAR(255) NOT NULL DEFAULT '0',
   currency VARCHAR(16) NOT NULL,
   idempotency_key VARCHAR(255) NULL,
   error_message TEXT NULL,

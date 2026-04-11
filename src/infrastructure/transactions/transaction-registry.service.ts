@@ -1,4 +1,5 @@
 import { ConflictException, Inject, Injectable, Logger } from '@nestjs/common';
+import { parseMoneyToMinorUnits } from '../../common/money/money';
 import {
   ReserveTransactionInput,
   TRANSACTION_RECORD_REPOSITORY,
@@ -60,13 +61,14 @@ export class TransactionRegistryService {
   private ensureSameTransactionIntent(input: ReserveTransactionInput, record: {
     accountId: string;
     operationType: string;
+    amountMinorUnits: string;
     amount: number;
     currency: string;
   }): void {
     if (
       input.accountId !== record.accountId ||
       input.operationType !== record.operationType ||
-      input.amount !== record.amount ||
+      parseMoneyToMinorUnits(input.amount).toString() !== record.amountMinorUnits ||
       input.currency !== record.currency
     ) {
       this.logger.error(

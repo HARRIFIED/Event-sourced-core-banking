@@ -3,6 +3,7 @@ export interface AccountSummaryReadModel {
   ownerId: string;
   currency: string;
   status: 'ACTIVE' | 'FROZEN';
+  balanceMinorUnits: string;
   balance: number;
   version: number;
   createdAt: string;
@@ -14,6 +15,7 @@ export interface AccountStatementEntryReadModel {
   accountId: string;
   streamVersion: number;
   eventType: string;
+  amountMinorUnits?: string;
   amount?: number;
   currency?: string;
   transactionId?: string;
