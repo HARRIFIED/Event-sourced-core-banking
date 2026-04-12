@@ -5,3 +5,5 @@ coverage
 .env
 .DS_Store
 t.md
+todo.md
+onboarding.md

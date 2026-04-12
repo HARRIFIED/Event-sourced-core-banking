@@ -324,6 +324,57 @@ Example response:
 }
 ```
 
+## Local Load Testing
+
+This repo now includes a mixed-workload load runner for local stress testing.
+
+It is intentionally scenario-driven instead of a pure raw-HTTP benchmark so it can:
+
+- create fresh accounts
+- generate unique `Idempotency-Key` values
+- generate unique deposit and withdrawal `transactionId` values
+- mix reads and writes against the same account pool
+- concentrate traffic on a hot subset of accounts to simulate real contention
+
+Start the app first, then run:
+
+```bash
+npm run load:test
+```
+
+Useful flags:
+
+- `--duration=60` total test length in seconds
+- `--workers=20` number of concurrent request loops
+- `--accounts=100` seed account count before the run starts
+- `--seed-concurrency=10` concurrent account creation during setup
+- `--initial-deposit=10000` opening balance per seeded account
+- `--min-amount=100`
+- `--max-amount=1500`
+- `--base-url=http://localhost:3000/api`
+- `--hot-account-ratio=0.1` top slice of accounts treated as hot
+- `--hot-selection-rate=0.8` chance a request targets the hot slice
+- `--deposit-weight=35`
+- `--withdraw-weight=30`
+- `--balance-weight=20`
+- `--history-weight=10`
+- `--create-weight=5`
+
+Example heavier run:
+
+```bash
+npm run load:test -- --duration=120 --workers=50 --accounts=250 --seed-concurrency=25 --initial-deposit=25000 --hot-account-ratio=0.05 --hot-selection-rate=0.9
+```
+
+What to watch for:
+
+- `400` responses can be expected under aggressive withdrawal pressure because some requests will hit insufficient funds
+- `409` responses usually indicate idempotency or transaction deduplication doing its job
+- `500` responses with `WrongExpectedVersion` are a signal that stream-level write contention is surfacing through the API and could use explicit conflict handling
+- balance and history reads may lag slightly behind successful writes because projections are asynchronous
+
+If you want a pure endpoint throughput benchmark as a separate experiment, you can also use `autocannon` externally against a single route, but the built-in script is the better fit for realistic account workflow stress.
+
 ## Projection Repair And Rebuild
 
 If the read model falls behind or becomes inconsistent, rebuild it from the event store.
