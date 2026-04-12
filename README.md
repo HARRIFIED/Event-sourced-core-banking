@@ -14,7 +14,7 @@ A NestJS learning project for building a realistic core banking or digital walle
 - Persist account changes as immutable domain events
 - Deduplicate account command retries with a Postgres-backed idempotency store
 - Guard deposit and withdrawal business transactions with a write-side transaction registry
-- Rehydrate aggregates from event history, using snapshots every 100 versions
+- Rehydrate aggregates from event history, using snapshots every 50 versions
 - Maintain read models for account details, balances, and statement history
 - Publish persisted events through a transactional outbox
 - Update live account projections through Kafka consumers
@@ -27,6 +27,7 @@ Longer design context lives in:
 
 - [docs/spec/spec-001.md](docs/spec/spec-001.md) for the baseline event-sourced write model, snapshots, and initial query side before outbox/Kafka live projection
 - [docs/spec/spec-002.md](docs/spec/spec-002.md) for the outbox, Kafka live projections, projection gap handling, and rebuild tooling update
+- [docs/spec/spec-003.md](docs/spec/spec-003.md) for hot-account concurrency hardening: server-side retry, per-account in-process mutex, snapshot tuning, and outbox poll interval reduction
 
 ## Architecture
 
@@ -104,7 +105,7 @@ The current account state is rebuilt from those facts, not from a mutable `accou
 
 To avoid replaying very long account streams from version `1` every time, the repo stores snapshots:
 
-- snapshot interval is currently `100` versions
+- snapshot interval is currently `50` versions
 - snapshots are a performance optimization only
 - the event stream remains the source of truth
 
@@ -369,9 +370,9 @@ npm run load:test -- --duration=120 --workers=50 --accounts=250 --seed-concurren
 What to watch for:
 
 - `400` responses can be expected under aggressive withdrawal pressure because some requests will hit insufficient funds
-- `409` responses usually indicate idempotency or transaction deduplication doing its job
-- `500` responses with `WrongExpectedVersion` are a signal that stream-level write contention is surfacing through the API and could use explicit conflict handling
-- balance and history reads may lag slightly behind successful writes because projections are asynchronous
+- `409` responses from deposits and withdrawals now indicate a genuine write conflict that exhausted all server-side retry attempts — this should be rare under normal load
+- `404` responses on balance or history reads can occur briefly after account creation because projections are asynchronous; they resolve quickly as the outbox publisher and Kafka consumer catch up
+- `500` responses are unexpected and indicate a system fault worth investigating
 
 If you want a pure endpoint throughput benchmark as a separate experiment, you can also use `autocannon` externally against a single route, but the built-in script is the better fit for realistic account workflow stress.
 
