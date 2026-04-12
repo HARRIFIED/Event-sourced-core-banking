@@ -7,7 +7,7 @@ import { OUTBOX_STORE, OutboxStore } from './outbox-store.interface';
 export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(OutboxPublisherService.name);
   private readonly batchSize = 100;
-  private readonly pollIntervalMs = 1000;
+  private readonly pollIntervalMs = 200;
   private isRunning = false;
   private loopPromise: Promise<void> | null = null;
 

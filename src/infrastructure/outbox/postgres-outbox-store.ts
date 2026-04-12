@@ -54,6 +54,7 @@ export class PostgresOutboxStore implements OutboxStore {
         message_key: string;
         payload: object;
         created_at: Date;
+        event_position: string | number | null;
         published_at: Date | null;
         attempts: number;
         last_error: string | null;
@@ -63,7 +64,7 @@ export class PostgresOutboxStore implements OutboxStore {
            FROM outbox_events
            WHERE published_at IS NULL
              AND processing_started_at IS NULL
-           ORDER BY created_at ASC
+           ORDER BY event_position ASC NULLS LAST, created_at ASC, id ASC
            LIMIT $1
            FOR UPDATE SKIP LOCKED
          )
@@ -72,6 +73,7 @@ export class PostgresOutboxStore implements OutboxStore {
          FROM next_batch
          WHERE target.id = next_batch.id
          RETURNING target.id, target.topic, target.message_key, target.payload,
+                   target.event_position,
                    target.created_at, target.published_at, target.attempts, target.last_error`,
         [limit],
       );
@@ -84,6 +86,7 @@ export class PostgresOutboxStore implements OutboxStore {
         messageKey: row.message_key,
         payload: row.payload,
         createdAt: new Date(row.created_at).toISOString(),
+        eventPosition: row.event_position === null ? undefined : Number(row.event_position),
         publishedAt: row.published_at ? new Date(row.published_at).toISOString() : null,
         attempts: Number(row.attempts),
         lastError: row.last_error,

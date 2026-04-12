@@ -4,6 +4,7 @@ export interface OutboxMessage {
   messageKey: string;
   payload: object;
   createdAt: string;
+  eventPosition?: number;
   publishedAt?: string | null;
   attempts: number;
   lastError?: string | null;

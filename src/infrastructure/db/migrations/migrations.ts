@@ -178,4 +178,21 @@ export const schemaMigrations: SqlMigration[] = [
          OR (amount_minor_units = '0' AND amount <> 0);
     `,
   },
+  {
+    version: 9,
+    name: 'add-outbox-event-position-ordering',
+    sql: `
+      ALTER TABLE outbox_events
+      ADD COLUMN IF NOT EXISTS event_position BIGINT NULL;
+
+      UPDATE outbox_events AS outbox
+      SET event_position = events.id
+      FROM events
+      WHERE outbox.event_position IS NULL
+        AND events.event_id::text = outbox.id::text;
+
+      CREATE INDEX IF NOT EXISTS idx_outbox_events_pending_event_position
+        ON outbox_events(published_at, processing_started_at, event_position, created_at);
+    `,
+  },
 ];
