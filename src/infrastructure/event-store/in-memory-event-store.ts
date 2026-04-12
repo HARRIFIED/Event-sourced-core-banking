@@ -1,6 +1,6 @@
 import { Injectable } from '@nestjs/common';
 import { DomainEvent } from '../../common/domain/domain-event';
-import { AppendOptions, EventStore } from './event-store.interface';
+import { AppendOptions, EventStore, WrongExpectedVersionError } from './event-store.interface';
 import { OUTBOX_STORE, OutboxStore } from '../outbox/outbox-store.interface';
 import { Inject } from '@nestjs/common';
 
@@ -16,8 +16,10 @@ export class InMemoryEventStore implements EventStore {
     const currentVersion = current.length;
 
     if (options.expectedVersion !== currentVersion) {
-      throw new Error(
-        `WrongExpectedVersion for stream ${streamId}. Expected ${options.expectedVersion}, actual ${currentVersion}`,
+      throw new WrongExpectedVersionError(
+        streamId,
+        options.expectedVersion,
+        currentVersion,
       );
     }
 

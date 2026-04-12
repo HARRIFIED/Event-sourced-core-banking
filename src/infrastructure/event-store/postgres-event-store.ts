@@ -1,7 +1,7 @@
 import { Inject, Injectable, OnModuleDestroy } from '@nestjs/common';
 import { Pool } from 'pg';
 import { DomainEvent } from '../../common/domain/domain-event';
-import { AppendOptions, EventStore } from './event-store.interface';
+import { AppendOptions, EventStore, WrongExpectedVersionError } from './event-store.interface';
 
 @Injectable()
 export class PostgresEventStore implements EventStore, OnModuleDestroy {
@@ -26,8 +26,10 @@ export class PostgresEventStore implements EventStore, OnModuleDestroy {
 
       const currentVersion = Number(versionResult.rows[0]?.version ?? 0);
       if (currentVersion !== options.expectedVersion) {
-        throw new Error(
-          `WrongExpectedVersion for stream ${streamId}. Expected ${options.expectedVersion}, actual ${currentVersion}`,
+        throw new WrongExpectedVersionError(
+          streamId,
+          options.expectedVersion,
+          currentVersion,
         );
       }
 
@@ -39,10 +41,11 @@ export class PostgresEventStore implements EventStore, OnModuleDestroy {
           streamId,
           streamVersion: currentVersion + i + 1,
         };
-        await client.query(
+        const insertResult = await client.query<{ id: string | number }>(
           `INSERT INTO events (
             event_id, stream_id, stream_version, event_type, event_data, event_metadata, occurred_at
-          ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::timestamptz)`,
+          ) VALUES ($1, $2, $3, $4, $5::jsonb, $6::jsonb, $7::timestamptz)
+          RETURNING id`,
           [
             persistedEvent.eventId,
             streamId,
@@ -53,21 +56,21 @@ export class PostgresEventStore implements EventStore, OnModuleDestroy {
             persistedEvent.occurredAt,
           ],
         );
+        const eventPosition = Number(insertResult.rows[0]?.id);
         appendedEvents.push(persistedEvent);
-      }
 
-      for (const event of appendedEvents) {
         await client.query(
           `INSERT INTO outbox_events (
-             id, topic, message_key, payload, created_at, attempts, published_at, last_error
-           ) VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz, 0, NULL, NULL)
+             id, topic, message_key, payload, created_at, event_position, attempts, published_at, last_error
+           ) VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz, $6, 0, NULL, NULL)
            ON CONFLICT (id) DO NOTHING`,
           [
-            event.eventId,
+            persistedEvent.eventId,
             this.topicForStream(streamId),
             streamId,
-            JSON.stringify(event),
-            event.occurredAt,
+            JSON.stringify(persistedEvent),
+            persistedEvent.occurredAt,
+            eventPosition,
           ],
         );
       }

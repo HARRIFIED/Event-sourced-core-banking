@@ -23,7 +23,15 @@ export class InMemoryOutboxStore implements OutboxStore {
   async claimPending(limit = 100): Promise<PendingOutboxMessage[]> {
     const pending = [...this.messages.values()]
       .filter((message) => !message.publishedAt && !this.claimed.has(message.id))
-      .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+      .sort((left, right) => {
+        const leftPosition = left.eventPosition ?? Number.MAX_SAFE_INTEGER;
+        const rightPosition = right.eventPosition ?? Number.MAX_SAFE_INTEGER;
+        if (leftPosition !== rightPosition) {
+          return leftPosition - rightPosition;
+        }
+
+        return left.createdAt.localeCompare(right.createdAt);
+      })
       .slice(0, limit);
 
     pending.forEach((message) => this.claimed.add(message.id));

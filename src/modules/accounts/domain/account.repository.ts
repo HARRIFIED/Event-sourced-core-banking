@@ -1,5 +1,5 @@
-import { Inject, Injectable } from '@nestjs/common';
-import { EVENT_STORE, EventStore } from '../../../infrastructure/event-store/event-store.interface';
+import { ConflictException, Inject, Injectable } from '@nestjs/common';
+import { EVENT_STORE, EventStore, WrongExpectedVersionError } from '../../../infrastructure/event-store/event-store.interface';
 import { SNAPSHOT_STORE, SnapshotStore } from '../../../infrastructure/snapshots/snapshot-store.interface';
 import { AccountAggregate, AccountSnapshotState } from './account.aggregate';
 
@@ -41,9 +41,19 @@ export class AccountRepository {
 
     const expectedVersion = aggregate.version - events.length;
 
-    await this.eventStore.append(streamId, events, {
-      expectedVersion,
-    });
+    try {
+      await this.eventStore.append(streamId, events, {
+        expectedVersion,
+      });
+    } catch (error) {
+      if (error instanceof WrongExpectedVersionError) {
+        throw new ConflictException(
+          `Concurrent modification detected for account ${accountId}. Retry the command with a fresh read of the latest state.`,
+        );
+      }
+
+      throw error;
+    }
 
     const previousSnapshotBoundary = Math.floor(expectedVersion / SNAPSHOT_INTERVAL);
     const currentSnapshotBoundary = Math.floor(aggregate.version / SNAPSHOT_INTERVAL);
