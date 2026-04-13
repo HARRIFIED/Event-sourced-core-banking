@@ -202,3 +202,54 @@ The snapshot interval change was applied directly to `SNAPSHOT_INTERVAL` in `acc
 **The retry loop increases tail latency under sustained cross-instance conflict.** Each retry adds a re-read round trip plus up to 30ms of jitter. This is acceptable for occasional conflicts but would compound under extreme multi-instance write pressure on the same account. That scenario is better addressed with an explicit per-account command queue.
 
 **Projection 404s are not fully eliminated.** They are reduced significantly by the shorter poll interval, but eventual consistency means a very fast read-after-write can still arrive before the projection is updated. A read-your-own-write pattern (e.g. falling back to event store replay when the projection version is stale relative to a known write version) would address this completely, but was not in scope for this phase.
+
+## Updated Load test result
+```
+  === Load Test Summary ===
+  Total completed requests: 19195
+  Total failed requests: 381
+  Average throughput: 152.43 req/s
+
+  [createAccount]
+    completed=904 failed=0
+    latency_ms p50=244.36 p95=442.02 p99=617.39 max=899.17
+    statuses 201:904
+
+  [deposit]
+    completed=6261 failed=0
+    latency_ms p50=391.38 p95=749.26 p99=1107.79 max=2919.23
+    statuses 201:6261
+
+  [getBalance]
+    completed=3447 failed=238
+    latency_ms p50=42.65 p95=82.32 p99=153.88 max=337.90
+    statuses 200:3209, 404:238
+    top_errors 3x Account load-1776013919620-acc-290 not found | 3x Account load-1776013919620-acc-331 not found | 3x Account load-1776013919620-acc-527 not found
+
+  [getHistory]
+    completed=1839 failed=143
+    latency_ms p50=82.50 p95=163.62 p99=276.47 max=447.11
+    statuses 200:1696, 404:143
+    top_errors 3x Account load-1776013919620-acc-243 not found | 2x Account load-1776013919620-acc-226 not found | 2x Account load-1776013919620-acc-317 not found
+
+  [health]
+    completed=1 failed=0
+    latency_ms p50=132.31 p95=132.31 p99=132.31 max=132.31
+    statuses 200:1
+
+  [seedCreateAccount]
+    completed=250 failed=0
+    latency_ms p50=179.06 p95=775.46 p99=807.40 max=808.25
+    statuses 201:250
+
+  [seedDeposit]
+    completed=1154 failed=0
+    latency_ms p50=329.67 p95=604.19 p99=706.05 max=1271.25
+    statuses 201:1154
+
+  [withdraw]
+    completed=5339 failed=0
+    latency_ms p50=394.35 p95=750.30 p99=1059.69 max=3013.51
+    statuses 201:5339
+```
+
