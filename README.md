@@ -492,10 +492,38 @@ Kafka broker values depend on where the app runs:
 - rebuild/admin endpoints are not authenticated yet
 - Kafka-based live projections still need broader operational hardening such as monitoring, lag visibility, and richer failure handling
 
-## Suggested Next Steps
-
+## Next Steps
 1. Add transfer status projection and query endpoint.
 2. Implement the durable transfer saga/process manager.
 3. Add auth and audit logging for admin rebuild endpoints.
 4. Add monitoring for outbox lag, consumer lag, and projection failures.
 5. Add integration tests covering concurrency conflicts, projection gaps, rebuild flows, and transaction/idempotency deduplication.
+
+## 🤝 Contributing
+
+Contributions are welcome.
+To keep things smooth and collaborative, please follow these best practices:
+
+1. **Fork the repository**  
+   Create your own copy of the repo to work on.
+
+2. **Create a feature branch**  
+   ```bash
+   git checkout -b feature/your-feature-name
+   ```
+3. **Make your changes**
+
+  . Keep commits small and meaningful.
+  
+  . Follow existing code style and conventions.
+  
+  . Add/update tests where applicable.
+
+4. **Run tests locally**
+5. **Make sure to update the README and then create a spec file with your updates (See previous file for inspo)**
+
+
+
+
+
+
