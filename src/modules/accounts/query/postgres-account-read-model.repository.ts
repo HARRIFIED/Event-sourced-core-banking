@@ -66,21 +66,29 @@ export class PostgresAccountReadModelRepository implements AccountReadModelRepos
       account_id: string;
       stream_version: number;
       event_type: string;
+      entry_kind: 'ACCOUNT_OPERATION' | 'TRANSFER' | null;
       amount: string | number | null;
       amount_minor_units: string | null;
       resolved_amount_minor_units: string | null;
       currency: string | null;
       transaction_id: string | null;
+      transfer_id: string | null;
+      transfer_direction: 'INCOMING' | 'OUTGOING' | 'REVERSAL' | null;
+      source_account_id: string | null;
+      destination_account_id: string | null;
+      counterparty_account_id: string | null;
+      description: string | null;
       reason: string | null;
       occurred_at: Date;
     }>(
-      `SELECT event_id, account_id, stream_version, event_type, amount, amount_minor_units,
+      `SELECT event_id, account_id, stream_version, event_type, entry_kind, amount, amount_minor_units,
               CASE
                 WHEN amount_minor_units IS NULL AND amount IS NOT NULL
                   THEN ((amount * 100)::bigint)::text
                 ELSE amount_minor_units
               END AS resolved_amount_minor_units,
-              currency, transaction_id, reason, occurred_at
+              currency, transaction_id, transfer_id, transfer_direction, source_account_id,
+              destination_account_id, counterparty_account_id, description, reason, occurred_at
        FROM account_statement
        WHERE account_id = $1
        ORDER BY stream_version ASC
@@ -93,10 +101,17 @@ export class PostgresAccountReadModelRepository implements AccountReadModelRepos
       accountId: row.account_id,
       streamVersion: Number(row.stream_version),
       eventType: row.event_type,
+      entryKind: row.entry_kind ?? undefined,
       amountMinorUnits: row.resolved_amount_minor_units ?? undefined,
       amount: row.resolved_amount_minor_units === null ? undefined : minorUnitsToNumber(BigInt(row.resolved_amount_minor_units)),
       currency: row.currency ?? undefined,
       transactionId: row.transaction_id ?? undefined,
+      transferId: row.transfer_id ?? undefined,
+      transferDirection: row.transfer_direction ?? undefined,
+      sourceAccountId: row.source_account_id ?? undefined,
+      destinationAccountId: row.destination_account_id ?? undefined,
+      counterpartyAccountId: row.counterparty_account_id ?? undefined,
+      description: row.description ?? undefined,
       reason: row.reason ?? undefined,
       occurredAt: new Date(row.occurred_at).toISOString(),
     }));
@@ -134,18 +149,26 @@ export class PostgresAccountReadModelRepository implements AccountReadModelRepos
   async appendAccountStatement(entry: AppendAccountStatementEntryInput): Promise<void> {
     await this.pool.query(
       `INSERT INTO account_statement (
-         event_id, account_id, stream_version, event_type, amount, amount_minor_units, currency, transaction_id, reason, occurred_at
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10::timestamptz)
-       ON CONFLICT (event_id) DO NOTHING`,
+         event_id, account_id, stream_version, event_type, entry_kind, amount, amount_minor_units, currency, transaction_id,
+         transfer_id, transfer_direction, source_account_id, destination_account_id, counterparty_account_id, description, reason, occurred_at
+       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17::timestamptz)
+        ON CONFLICT (event_id) DO NOTHING`,
       [
         entry.eventId,
         entry.accountId,
         entry.streamVersion,
         entry.eventType,
+        entry.entryKind ?? null,
         entry.amount ?? null,
         entry.amountMinorUnits ?? (entry.amount === undefined ? null : parseMoneyToMinorUnits(entry.amount).toString()),
         entry.currency ?? null,
         entry.transactionId ?? null,
+        entry.transferId ?? null,
+        entry.transferDirection ?? null,
+        entry.sourceAccountId ?? null,
+        entry.destinationAccountId ?? null,
+        entry.counterpartyAccountId ?? null,
+        entry.description ?? null,
         entry.reason ?? null,
         entry.occurredAt,
       ],

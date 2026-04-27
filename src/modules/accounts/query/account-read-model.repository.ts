@@ -15,10 +15,17 @@ export interface AccountStatementEntryReadModel {
   accountId: string;
   streamVersion: number;
   eventType: string;
+  entryKind?: 'ACCOUNT_OPERATION' | 'TRANSFER';
   amountMinorUnits?: string;
   amount?: number;
   currency?: string;
   transactionId?: string;
+  transferId?: string;
+  transferDirection?: 'INCOMING' | 'OUTGOING' | 'REVERSAL';
+  sourceAccountId?: string;
+  destinationAccountId?: string;
+  counterpartyAccountId?: string;
+  description?: string;
   reason?: string;
   occurredAt: string;
 }

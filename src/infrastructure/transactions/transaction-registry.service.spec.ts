@@ -21,6 +21,7 @@ describe('TransactionRegistryService', () => {
           updatedAt: new Date().toISOString(),
         },
       }),
+      markPending: jest.fn(),
       markCompleted: jest.fn(),
       markFailed: jest.fn(),
     };
@@ -59,6 +60,7 @@ describe('TransactionRegistryService', () => {
           updatedAt: new Date().toISOString(),
         },
       }),
+      markPending: jest.fn(),
       markCompleted: jest.fn(),
       markFailed: jest.fn(),
     };

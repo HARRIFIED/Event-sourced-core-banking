@@ -48,7 +48,7 @@ export class IdempotencyService {
       }
 
       if (record.status === 'IN_PROGRESS') {
-          this.logger.warn(
+        this.logger.warn(
           `Request with Idempotency-Key ${idempotencyKey} is already in progress. Rejecting duplicate request.`,
         );
         throw new ConflictException(

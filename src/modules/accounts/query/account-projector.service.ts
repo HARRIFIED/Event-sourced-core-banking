@@ -7,6 +7,11 @@ import {
   AccountReadModelRepository,
   AccountSummaryReadModel,
 } from './account-read-model.repository';
+import {
+  TRANSFER_READ_MODEL_REPOSITORY,
+  TransferReadModelRepository,
+  TransferSummaryReadModel,
+} from '../../transfers/query/transfer-read-model.repository';
 
 export class ProjectionGapError extends Error {
   constructor(accountId: string, expectedVersion: number, actualVersion: number) {
@@ -22,6 +27,8 @@ export class AccountProjector {
   constructor(
     @Inject(ACCOUNT_READ_MODEL_REPOSITORY)
     private readonly readModels: AccountReadModelRepository,
+    @Inject(TRANSFER_READ_MODEL_REPOSITORY)
+    private readonly transferReadModels: TransferReadModelRepository,
   ) {}
 
   async project(event: DomainEvent & { position?: number }): Promise<boolean> {
@@ -90,6 +97,7 @@ export class AccountProjector {
 
     const amountMinorUnits = parseMoneyToMinorUnits(event.data.amount as string);
     const nextBalanceMinorUnits = BigInt(summary.balanceMinorUnits) + amountMinorUnits;
+    const transferDetails = await this.getTransferStatementDetails(event, accountId);
 
     await this.readModels.upsertAccountSummary({
       ...summary,
@@ -104,10 +112,17 @@ export class AccountProjector {
       accountId,
       streamVersion: event.streamVersion,
       eventType: event.eventType,
+      entryKind: transferDetails?.entryKind ?? 'ACCOUNT_OPERATION',
       amountMinorUnits: amountMinorUnits.toString(),
       amount: minorUnitsToNumber(amountMinorUnits),
       currency: event.data.currency as string,
       transactionId: event.data.transactionId as string,
+      transferId: transferDetails?.transferId,
+      transferDirection: transferDetails?.transferDirection,
+      sourceAccountId: transferDetails?.sourceAccountId,
+      destinationAccountId: transferDetails?.destinationAccountId,
+      counterpartyAccountId: transferDetails?.counterpartyAccountId,
+      description: transferDetails?.description,
       occurredAt: event.occurredAt,
     });
   }
@@ -122,6 +137,7 @@ export class AccountProjector {
 
     const amountMinorUnits = parseMoneyToMinorUnits(event.data.amount as string);
     const nextBalanceMinorUnits = BigInt(summary.balanceMinorUnits) - amountMinorUnits;
+    const transferDetails = await this.getTransferStatementDetails(event, accountId);
 
     await this.readModels.upsertAccountSummary({
       ...summary,
@@ -136,10 +152,17 @@ export class AccountProjector {
       accountId,
       streamVersion: event.streamVersion,
       eventType: event.eventType,
+      entryKind: transferDetails?.entryKind ?? 'ACCOUNT_OPERATION',
       amountMinorUnits: amountMinorUnits.toString(),
       amount: minorUnitsToNumber(amountMinorUnits),
       currency: event.data.currency as string,
       transactionId: event.data.transactionId as string,
+      transferId: transferDetails?.transferId,
+      transferDirection: transferDetails?.transferDirection,
+      sourceAccountId: transferDetails?.sourceAccountId,
+      destinationAccountId: transferDetails?.destinationAccountId,
+      counterpartyAccountId: transferDetails?.counterpartyAccountId,
+      description: transferDetails?.description,
       occurredAt: event.occurredAt,
     });
   }
@@ -183,5 +206,75 @@ export class AccountProjector {
     if (incomingVersion !== expectedNextVersion) {
       throw new ProjectionGapError(accountId, expectedNextVersion, incomingVersion);
     }
+  }
+
+  private async getTransferStatementDetails(
+    event: DomainEvent & { position?: number },
+    accountId: string,
+  ): Promise<{
+    entryKind: 'TRANSFER';
+    transferId: string;
+    transferDirection: 'INCOMING' | 'OUTGOING' | 'REVERSAL';
+    sourceAccountId: string;
+    destinationAccountId: string;
+    counterpartyAccountId: string;
+    description: string;
+  } | null> {
+    const transferId = event.metadata.correlationId;
+    if (!transferId) {
+      return null;
+    }
+
+    const transfer = await this.transferReadModels.getTransferSummary(transferId);
+    if (!transfer) {
+      return null;
+    }
+
+    return this.mapTransferStatementDetails(transfer, accountId);
+  }
+
+  private mapTransferStatementDetails(
+    transfer: TransferSummaryReadModel,
+    accountId: string,
+  ): {
+    entryKind: 'TRANSFER';
+    transferId: string;
+    transferDirection: 'INCOMING' | 'OUTGOING' | 'REVERSAL';
+    sourceAccountId: string;
+    destinationAccountId: string;
+    counterpartyAccountId: string;
+    description: string;
+  } | null {
+    if (transfer.sourceAccountId === accountId) {
+      const isCompensation =
+        transfer.compensationTransactionId !== undefined &&
+        transfer.sourceDebitTransactionId !== transfer.compensationTransactionId;
+
+      return {
+        entryKind: 'TRANSFER',
+        transferId: transfer.transferId,
+        transferDirection: isCompensation ? 'REVERSAL' : 'OUTGOING',
+        sourceAccountId: transfer.sourceAccountId,
+        destinationAccountId: transfer.destinationAccountId,
+        counterpartyAccountId: transfer.destinationAccountId,
+        description: isCompensation
+          ? `Transfer reversal back from failed transfer to account ${transfer.destinationAccountId}`
+          : `Transfer sent to account ${transfer.destinationAccountId}`,
+      };
+    }
+
+    if (transfer.destinationAccountId === accountId) {
+      return {
+        entryKind: 'TRANSFER',
+        transferId: transfer.transferId,
+        transferDirection: 'INCOMING',
+        sourceAccountId: transfer.sourceAccountId,
+        destinationAccountId: transfer.destinationAccountId,
+        counterpartyAccountId: transfer.sourceAccountId,
+        description: `Transfer received from account ${transfer.sourceAccountId}`,
+      };
+    }
+
+    return null;
   }
 }
