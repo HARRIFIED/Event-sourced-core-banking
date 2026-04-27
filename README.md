@@ -11,13 +11,15 @@ A NestJS learning project for building a realistic core banking or digital walle
 ## What This Repo Does Today
 
 - Create, deposit into, withdraw from, and freeze accounts
+- Initiate durable internal account-to-account transfers and track their status
 - Persist account changes as immutable domain events
 - Deduplicate account command retries with a Postgres-backed idempotency store
 - Guard deposit and withdrawal business transactions with a write-side transaction registry
+- Run debit-credit-compensation transfer orchestration with durable retry-safe leg tracking
 - Rehydrate aggregates from event history, using snapshots every 50 versions
-- Maintain read models for account details, balances, and statement history
+- Maintain read models for account details, balances, statement history, and transfer status
 - Publish persisted events through a transactional outbox
-- Update live account projections through Kafka consumers
+- Update live account and transfer projections through Kafka consumers
 - Keep manual replay and rebuild tooling backed by the event store
 - Run lightweight versioned SQL migrations in Postgres mode
 
@@ -28,13 +30,14 @@ Longer design context lives in:
 - [docs/spec/spec-001.md](docs/spec/spec-001.md) for the baseline event-sourced write model, snapshots, and initial query side before outbox/Kafka live projection
 - [docs/spec/spec-002.md](docs/spec/spec-002.md) for the outbox, Kafka live projections, projection gap handling, and rebuild tooling update
 - [docs/spec/spec-003.md](docs/spec/spec-003.md) for hot-account concurrency hardening: server-side retry, per-account in-process mutex, snapshot tuning, and outbox poll interval reduction
+- [docs/spec/spec-004.md](docs/spec/spec-004.md) for durable internal transfers, transfer projections, and compensation-based recovery
 
 ## Architecture
 
 This repo uses a modular monolith with clear boundaries:
 
 - `accounts` for account commands, aggregate logic, projections, and queries
-- `transfers` for transfer orchestration scaffolding
+- `transfers` for event-sourced transfer orchestration, status projections, and recovery
 - `infrastructure` for database access, event store, snapshots, projections, and messaging
 
 High-level flow:
@@ -124,9 +127,10 @@ Current projection tables:
 
 - `account_summary`
 - `account_statement`
+- `transfer_summary`
 - `projection_checkpoints`
 
-Live account projection updates are Kafka-driven.
+Live account and transfer projection updates are Kafka-driven.
 
 The manual projection runner remains in the codebase for:
 
@@ -153,6 +157,7 @@ In Postgres mode, the app uses:
 - `outbox_events` for reliable event publication
 - `idempotency_records` for API-level command deduplication
 - `transaction_records` for business transaction deduplication
+- `transfer_summary` for transfer status tracking
 - `schema_migrations` for versioned SQL migrations
 
 ## Quickstart
@@ -235,13 +240,26 @@ curl -X POST http://localhost:3000/api/accounts/acc-1/freeze \
   -d "{\"reason\":\"compliance review\"}"
 ```
 
-Transfer scaffolding:
+Transfer initiation:
 
 ```bash
 curl -X POST http://localhost:3000/api/transfers \
   -H "Content-Type: application/json" \
-  -d "{\"sourceAccountId\":\"acc-1\",\"destinationAccountId\":\"acc-2\",\"amount\":150,\"currency\":\"USD\"}"
+  -H "Idempotency-Key: 4f2a1e1d-79a0-4f4c-96d1-635c5f85c3a4" \
+  -d "{\"transferId\":\"trf-1\",\"sourceAccountId\":\"acc-1\",\"destinationAccountId\":\"acc-2\",\"amount\":150,\"currency\":\"USD\"}"
 ```
+
+Transfer status:
+
+```bash
+curl http://localhost:3000/api/transfers/trf-1
+```
+
+Transfers are asynchronous:
+
+- `POST /transfers` returns once the transfer intent is durably recorded
+- the transfer coordinator drives debit, credit, and compensation in the background
+- clients should follow up with `GET /transfers/:transferId` for the latest status
 
 ## Account Query Endpoints
 
@@ -383,6 +401,7 @@ If the read model falls behind or becomes inconsistent, rebuild it from the even
 HTTP admin endpoints:
 
 - `POST /api/admin/projections/accounts/:accountId/rebuild`
+- `POST /api/admin/projections/transfers/:transferId/rebuild`
 - `POST /api/admin/projections/accounts/rebuild-all`
 
 Examples:
@@ -395,6 +414,10 @@ curl -X POST http://localhost:3000/api/admin/projections/accounts/acc-1/rebuild
 curl -X POST http://localhost:3000/api/admin/projections/accounts/rebuild-all
 ```
 
+```bash
+curl -X POST http://localhost:3000/api/admin/projections/transfers/trf-1/rebuild
+```
+
 CLI rebuild script:
 
 ```bash
@@ -403,6 +426,10 @@ npm run projections:rebuild -- account acc-1
 
 ```bash
 npm run projections:rebuild -- all
+```
+
+```bash
+npm run projections:rebuild -- transfer trf-1
 ```
 
 ## Eventual Consistency Note
@@ -440,6 +467,12 @@ That means:
 - `transactionId` protects the business money movement
 
 Even if a caller changes the `Idempotency-Key`, reusing the same `transactionId` for a deposit or withdrawal will not create a second business transaction.
+
+Transfers use both layers too:
+
+- `Idempotency-Key` deduplicates `POST /transfers`
+- `transferId` is the stable business identifier for the transfer itself
+- transfer leg transaction ids are derived from the transfer id so debit, credit, and compensation can be retried safely after crashes
 
 ## Database And Migrations
 
@@ -486,18 +519,19 @@ Kafka broker values depend on where the app runs:
 
 ## Current Limitations
 
-- account query projections are currently the only implemented read models
-- transfer flow is still scaffolding rather than a full durable saga
+- transfers are currently internal only; no external rails or settlement integration yet
+- transfers are same-currency only; no FX or exchange-rate handling
+- no client-driven transfer cancellation yet
 - no read-your-own-write strategy yet for query-after-command UX
 - rebuild/admin endpoints are not authenticated yet
 - Kafka-based live projections still need broader operational hardening such as monitoring, lag visibility, and richer failure handling
 
 ## Next Steps
-1. Add transfer status projection and query endpoint.
-2. Implement the durable transfer saga/process manager.
-3. Add auth and audit logging for admin rebuild endpoints.
-4. Add monitoring for outbox lag, consumer lag, and projection failures.
-5. Add integration tests covering concurrency conflicts, projection gaps, rebuild flows, and transaction/idempotency deduplication.
+1. Add richer operator tooling for stuck-transfer inspection and replay.
+2. Add auth and audit logging for admin rebuild endpoints.
+3. Add monitoring for outbox lag, consumer lag, transfer retries, and projection failures.
+4. Add optional client-driven transfer cancellation with explicit lifecycle rules.
+5. Explore balance holds or reservations as an alternative to immediate debit plus compensation.
 
 ## 🤝 Contributing
 

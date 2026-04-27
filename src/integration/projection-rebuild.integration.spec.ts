@@ -8,6 +8,9 @@ import { AccountRepository } from '../modules/accounts/domain/account.repository
 import { ProjectionGapError } from '../modules/accounts/query/account-projector.service';
 import { AccountProjector } from '../modules/accounts/query/account-projector.service';
 import { InMemoryAccountReadModelRepository } from '../modules/accounts/query/in-memory-account-read-model.repository';
+import { InMemoryTransferReadModelRepository } from '../modules/transfers/query/in-memory-transfer-read-model.repository';
+import { TransferProjector } from '../modules/transfers/query/transfer-projector.service';
+import { ConfigService } from '@nestjs/config';
 
 function buildStack() {
   const outboxStore = new InMemoryOutboxStore();
@@ -15,9 +18,28 @@ function buildStack() {
   const snapshotStore = new InMemorySnapshotStore();
   const repository = new AccountRepository(eventStore, snapshotStore);
   const readModelRepo = new InMemoryAccountReadModelRepository();
-  const projector = new AccountProjector(readModelRepo);
-  const projectionRunner = new ProjectionRunnerService(eventStore, readModelRepo, projector);
-  return { outboxStore, eventStore, snapshotStore, repository, readModelRepo, projector, projectionRunner };
+  const transferReadModelRepo = new InMemoryTransferReadModelRepository();
+  const projector = new AccountProjector(readModelRepo, transferReadModelRepo);
+  const transferProjector = new TransferProjector(transferReadModelRepo);
+  const projectionRunner = new ProjectionRunnerService(
+    new ConfigService({ EVENT_STORE_KIND: 'in-memory' }),
+    eventStore,
+    readModelRepo,
+    transferReadModelRepo,
+    projector,
+    transferProjector,
+  );
+  return {
+    outboxStore,
+    eventStore,
+    snapshotStore,
+    repository,
+    readModelRepo,
+    transferReadModelRepo,
+    projector,
+    transferProjector,
+    projectionRunner,
+  };
 }
 
 function ctx() {

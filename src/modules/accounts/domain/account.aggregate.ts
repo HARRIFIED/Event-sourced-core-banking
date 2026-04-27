@@ -81,6 +81,7 @@ export class AccountAggregate extends AggregateRoot {
     );
   }
 
+  // Snapshot methods for optimized loading
   getSnapshotState(): AccountSnapshotState {
     return {
       accountId: this.accountId,
@@ -100,6 +101,7 @@ export class AccountAggregate extends AggregateRoot {
     this.version = version;
   }
   
+  // Domain event handler
   protected when(event: DomainEvent): void {
     this.version = event.streamVersion;
 
@@ -140,6 +142,7 @@ export class AccountAggregate extends AggregateRoot {
     }
   }
 
+  // Helper method to create events with consistent metadata and stream ID
   private makeEvent(
     eventType: string,
     data: Record<string, unknown>,

@@ -3,6 +3,10 @@ import { IsNotEmpty, IsNumber, IsPositive, IsString, Length } from 'class-valida
 export class InitiateTransferDto {
   @IsString()
   @IsNotEmpty()
+  transferId!: string;
+
+  @IsString()
+  @IsNotEmpty()
   sourceAccountId!: string;
 
   @IsString()

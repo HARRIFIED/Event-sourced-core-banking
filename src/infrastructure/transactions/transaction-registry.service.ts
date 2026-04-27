@@ -17,6 +17,10 @@ export class TransactionRegistryService {
   async execute(
     input: ReserveTransactionInput,
     handler: () => Promise<{ status: string }>,
+    options?: {
+      retryFailed?: boolean;
+      isRetryableError?: (error: unknown) => boolean;
+    },
   ): Promise<{ status: string }> {
     const { created, record } = await this.repository.reserve(input);
 
@@ -39,12 +43,23 @@ export class TransactionRegistryService {
         );
       }
 
+      if (record.status === 'FAILED_RETRYABLE' && options?.retryFailed) {
+        this.logger.warn(
+          `Transaction ${input.transactionId} previously failed with a retryable error. Reopening for another attempt.`,
+        );
+        await this.repository.markPending(input.transactionId);
+      } else if (record.status === 'FAILED_RETRYABLE') {
+        throw new ConflictException(
+          `Transaction ${input.transactionId} previously failed. Retry with a new transactionId.`,
+        );
+      } else {
       this.logger.error(
         `Transaction ${input.transactionId} previously failed with error: ${record.errorMessage}. Rejecting retry attempt.`,
       );
       throw new ConflictException(
         `Transaction ${input.transactionId} previously failed. Retry with a new transactionId.`,
       );
+      }
     }
 
     try {
@@ -53,7 +68,8 @@ export class TransactionRegistryService {
       return response;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      await this.repository.markFailed(input.transactionId, message);
+      const status = options?.isRetryableError?.(error) ? 'FAILED_RETRYABLE' : 'FAILED_TERMINAL';
+      await this.repository.markFailed(input.transactionId, message, status);
       throw error;
     }
   }

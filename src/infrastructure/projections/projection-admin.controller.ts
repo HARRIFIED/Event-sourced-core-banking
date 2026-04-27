@@ -21,4 +21,13 @@ export class ProjectionAdminController {
       status: 'rebuild-completed',
     };
   }
+
+  @Post('transfers/:transferId/rebuild')
+  async rebuildTransfer(@Param('transferId') transferId: string): Promise<{ status: string; transferId: string }> {
+    await this.projectionRunner.rebuildTransfer(transferId);
+    return {
+      status: 'rebuild-completed',
+      transferId,
+    };
+  }
 }

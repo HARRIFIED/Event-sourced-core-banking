@@ -17,7 +17,7 @@ export class PostgresTransactionRecordRepository implements TransactionRecordRep
       transaction_id: string;
       account_id: string;
       operation_type: 'DEPOSIT' | 'WITHDRAW';
-      status: 'PENDING' | 'COMPLETED' | 'FAILED';
+      status: 'PENDING' | 'COMPLETED' | 'FAILED_RETRYABLE' | 'FAILED_TERMINAL';
       amount_minor_units: string;
       amount: string | number;
       currency: string;
@@ -54,7 +54,7 @@ export class PostgresTransactionRecordRepository implements TransactionRecordRep
       transaction_id: string;
       account_id: string;
       operation_type: 'DEPOSIT' | 'WITHDRAW';
-      status: 'PENDING' | 'COMPLETED' | 'FAILED';
+      status: 'PENDING' | 'COMPLETED' | 'FAILED_RETRYABLE' | 'FAILED_TERMINAL';
       amount_minor_units: string;
       amount: string | number;
       currency: string;
@@ -86,14 +86,28 @@ export class PostgresTransactionRecordRepository implements TransactionRecordRep
     );
   }
 
-  async markFailed(transactionId: string, errorMessage: string): Promise<void> {
+  async markPending(transactionId: string): Promise<void> {
     await this.pool.query(
       `UPDATE transaction_records
-       SET status = 'FAILED',
-           error_message = $2,
+       SET status = 'PENDING',
            updated_at = NOW()
        WHERE transaction_id = $1`,
-      [transactionId, errorMessage],
+      [transactionId],
+    );
+  }
+
+  async markFailed(
+    transactionId: string,
+    errorMessage: string,
+    status: 'FAILED_RETRYABLE' | 'FAILED_TERMINAL',
+  ): Promise<void> {
+    await this.pool.query(
+      `UPDATE transaction_records
+       SET status = $2,
+           error_message = $3,
+           updated_at = NOW()
+       WHERE transaction_id = $1`,
+      [transactionId, status, errorMessage],
     );
   }
 
@@ -101,7 +115,7 @@ export class PostgresTransactionRecordRepository implements TransactionRecordRep
     transaction_id: string;
     account_id: string;
     operation_type: 'DEPOSIT' | 'WITHDRAW';
-    status: 'PENDING' | 'COMPLETED' | 'FAILED';
+    status: 'PENDING' | 'COMPLETED' | 'FAILED_RETRYABLE' | 'FAILED_TERMINAL';
     amount_minor_units: string;
     amount: string | number;
     currency: string;

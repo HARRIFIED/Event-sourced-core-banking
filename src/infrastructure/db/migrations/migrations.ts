@@ -195,4 +195,49 @@ export const schemaMigrations: SqlMigration[] = [
         ON outbox_events(published_at, processing_started_at, event_position, created_at);
     `,
   },
+  {
+    version: 10,
+    name: 'create-transfer-summary-table',
+    sql: `
+      CREATE TABLE IF NOT EXISTS transfer_summary (
+        transfer_id VARCHAR(255) PRIMARY KEY,
+        source_account_id VARCHAR(255) NOT NULL,
+        destination_account_id VARCHAR(255) NOT NULL,
+        amount NUMERIC(19, 2) NOT NULL,
+        amount_minor_units VARCHAR(255) NOT NULL,
+        currency VARCHAR(16) NOT NULL,
+        status VARCHAR(64) NOT NULL,
+        failure_reason TEXT NULL,
+        failure_stage VARCHAR(32) NULL,
+        source_debit_transaction_id VARCHAR(255) NULL,
+        destination_credit_transaction_id VARCHAR(255) NULL,
+        compensation_transaction_id VARCHAR(255) NULL,
+        debit_attempts INT NOT NULL DEFAULT 0,
+        credit_attempts INT NOT NULL DEFAULT 0,
+        compensation_attempts INT NOT NULL DEFAULT 0,
+        created_at TIMESTAMPTZ NOT NULL,
+        updated_at TIMESTAMPTZ NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_transfer_summary_status_updated_at
+        ON transfer_summary(status, updated_at);
+    `,
+  },
+  {
+    version: 11,
+    name: 'enrich-account-statement-transfer-details',
+    sql: `
+      ALTER TABLE account_statement
+      ADD COLUMN IF NOT EXISTS entry_kind VARCHAR(32) NULL,
+      ADD COLUMN IF NOT EXISTS transfer_id VARCHAR(255) NULL,
+      ADD COLUMN IF NOT EXISTS transfer_direction VARCHAR(32) NULL,
+      ADD COLUMN IF NOT EXISTS source_account_id VARCHAR(255) NULL,
+      ADD COLUMN IF NOT EXISTS destination_account_id VARCHAR(255) NULL,
+      ADD COLUMN IF NOT EXISTS counterparty_account_id VARCHAR(255) NULL,
+      ADD COLUMN IF NOT EXISTS description TEXT NULL;
+
+      CREATE INDEX IF NOT EXISTS idx_account_statement_transfer_id
+        ON account_statement(transfer_id);
+    `,
+  },
 ];

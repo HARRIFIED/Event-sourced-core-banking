@@ -6,6 +6,7 @@ import { AccountEventTypes } from '../modules/accounts/application/events/accoun
 import { AccountRepository } from '../modules/accounts/domain/account.repository';
 import { AccountProjector, ProjectionGapError } from '../modules/accounts/query/account-projector.service';
 import { InMemoryAccountReadModelRepository } from '../modules/accounts/query/in-memory-account-read-model.repository';
+import { InMemoryTransferReadModelRepository } from '../modules/transfers/query/in-memory-transfer-read-model.repository';
 
 function buildStack() {
   const outboxStore = new InMemoryOutboxStore();
@@ -13,8 +14,9 @@ function buildStack() {
   const snapshotStore = new InMemorySnapshotStore();
   const repository = new AccountRepository(eventStore, snapshotStore);
   const readModelRepo = new InMemoryAccountReadModelRepository();
-  const projector = new AccountProjector(readModelRepo);
-  return { outboxStore, eventStore, snapshotStore, repository, readModelRepo, projector };
+  const transferReadModelRepo = new InMemoryTransferReadModelRepository();
+  const projector = new AccountProjector(readModelRepo, transferReadModelRepo);
+  return { outboxStore, eventStore, snapshotStore, repository, readModelRepo, transferReadModelRepo, projector };
 }
 
 function ctx() {
