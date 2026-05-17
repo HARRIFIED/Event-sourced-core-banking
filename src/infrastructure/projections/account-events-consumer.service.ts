@@ -4,6 +4,8 @@ import { Consumer } from 'kafkajs';
 import { DomainEvent } from '../../common/domain/domain-event';
 import { AccountProjector } from '../../modules/accounts/query/account-projector.service';
 import { KafkaClient } from '../messaging/kafka.client';
+import { ObservabilityService } from '../observability/observability.service';
+import { ProjectionCoordinationService } from './projection-coordination.service';
 
 @Injectable()
 export class AccountEventsConsumerService implements OnModuleInit, OnModuleDestroy {
@@ -14,11 +16,20 @@ export class AccountEventsConsumerService implements OnModuleInit, OnModuleDestr
     private readonly kafkaClient: KafkaClient,
     private readonly accountProjector: AccountProjector,
     private readonly configService: ConfigService,
+    private readonly observability: ObservabilityService,
+    private readonly projectionCoordination: ProjectionCoordinationService,
   ) {}
 
   async onModuleInit(): Promise<void> {
     const storeKind = this.configService.get<string>('EVENT_STORE_KIND', 'in-memory');
     if (storeKind !== 'postgres') {
+      return;
+    }
+
+    const liveConsumersEnabled =
+      this.configService.get<string>('PROJECTION_LIVE_CONSUMERS_ENABLED', 'true') !== 'false';
+    if (!liveConsumersEnabled) {
+      this.logger.log('Kafka live projection consumer for account-events is disabled by configuration.');
       return;
     }
 
@@ -32,14 +43,33 @@ export class AccountEventsConsumerService implements OnModuleInit, OnModuleDestr
       await this.consumer.subscribe({ topic: 'account-events', fromBeginning: true });
       await this.consumer.run({
         eachMessage: async ({ message }) => {
+          const startedAt = process.hrtime.bigint();
           if (!message.value) {
             return;
           }
 
-          const event = JSON.parse(message.value.toString()) as DomainEvent;
-          const handled = await this.accountProjector.project(event);
-          if (handled) {
-            this.logger.debug(`Projected Kafka event ${event.eventType} v${event.streamVersion}`);
+          try {
+            const event = JSON.parse(message.value.toString()) as DomainEvent;
+            const handled = await this.projectionCoordination.runShared(() => this.accountProjector.project(event));
+            const durationSeconds = Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
+            this.observability.recordKafkaMessage(
+              AccountEventsConsumerService.name,
+              'account-events',
+              'success',
+              durationSeconds,
+            );
+            if (handled) {
+              this.logger.debug(`Projected Kafka event ${event.eventType} v${event.streamVersion}`);
+            }
+          } catch (error) {
+            const durationSeconds = Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
+            this.observability.recordKafkaMessage(
+              AccountEventsConsumerService.name,
+              'account-events',
+              'failure',
+              durationSeconds,
+            );
+            throw error;
           }
         },
       });

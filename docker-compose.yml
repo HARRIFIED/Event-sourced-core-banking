@@ -8,7 +8,7 @@ services:
       - postgres
       - kafka
     environment:
-      PORT: 3000
+      PORT: ${PORT:-3000}
       EVENT_STORE_KIND: postgres
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
@@ -18,7 +18,7 @@ services:
       KAFKA_BROKER: kafka:9092
       KAFKA_CLIENT_ID: core-banking-app
     ports:
-      - '3000:3000'
+      - '${PORT:-3000}:${PORT:-3000}'
     networks:
       - internal
 
@@ -68,8 +68,85 @@ services:
     networks:
       - internal
 
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    container_name: core-banking-prometheus
+    environment:
+      PROMETHEUS_APP_TARGET: ${PROMETHEUS_APP_TARGET:-host.docker.internal:${PORT:-3000}}
+    entrypoint:
+      - /bin/sh
+      - /etc/prometheus/run-prometheus.sh
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml.tpl:/etc/prometheus/prometheus.yml.tpl:ro
+      - ./monitoring/prometheus/run-prometheus.sh:/etc/prometheus/run-prometheus.sh:ro
+      - prometheus_data:/prometheus
+    ports:
+      - '9090:9090'
+    networks:
+      - internal
+
+  grafana:
+    image: grafana/grafana:11.1.4
+    container_name: core-banking-grafana
+    depends_on:
+      - prometheus
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources:ro
+      - ./monitoring/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - '3001:3000'
+    networks:
+      - internal
+
+  postgres-exporter:
+    image: prometheuscommunity/postgres-exporter:v0.15.0
+    container_name: core-banking-postgres-exporter
+    depends_on:
+      - postgres
+    environment:
+      DATA_SOURCE_NAME: postgresql://banking:banking@postgres:5432/banking?sslmode=disable
+    ports:
+      - '9187:9187'
+    networks:
+      - internal
+
+  kafka-exporter:
+    image: danielqsj/kafka-exporter:v1.7.0
+    container_name: core-banking-kafka-exporter
+    depends_on:
+      - kafka
+    command:
+      - '--kafka.server=kafka:9092'
+    ports:
+      - '9308:9308'
+    networks:
+      - internal
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.49.1
+    container_name: core-banking-cadvisor
+    privileged: true
+    devices:
+      - /dev/kmsg
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /var/lib/docker/:/var/lib/docker:ro
+    ports:
+      - '8081:8080'
+    networks:
+      - internal
+
 volumes:
   postgres_data:
+  prometheus_data:
+  grafana_data:
 
 networks:
   internal:

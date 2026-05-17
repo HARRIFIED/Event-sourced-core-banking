@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nest
 import { ConfigService } from '@nestjs/config';
 import { KafkaClient } from '../messaging/kafka.client';
 import { OUTBOX_STORE, OutboxStore } from './outbox-store.interface';
+import { ObservabilityService } from '../observability/observability.service';
 
 @Injectable()
 export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
@@ -15,6 +16,7 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
     @Inject(OUTBOX_STORE) private readonly outboxStore: OutboxStore,
     private readonly kafkaClient: KafkaClient,
     private readonly configService: ConfigService,
+    private readonly observability: ObservabilityService,
   ) {}
 
   onModuleInit(): void {
@@ -36,6 +38,7 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
     while (this.isRunning) {
       try {
         const messages = await this.outboxStore.claimPending(this.batchSize);
+        this.observability.recordOutboxClaimBatch(messages.length);
         if (messages.length === 0) {
           await this.sleep(this.pollIntervalMs);
           continue;
@@ -45,9 +48,11 @@ export class OutboxPublisherService implements OnModuleInit, OnModuleDestroy {
           try {
             await this.kafkaClient.publish(message.topic, message.messageKey, message.payload);
             await this.outboxStore.markPublished(message.id);
+            this.observability.recordOutboxPublishSuccess(message.topic);
           } catch (error) {
             const msg = error instanceof Error ? error.message : String(error);
             await this.outboxStore.markFailed(message.id, msg);
+            this.observability.recordOutboxPublishFailure(message.topic);
             this.logger.error(`Failed to publish outbox message ${message.id}: ${msg}`);
           }
         }

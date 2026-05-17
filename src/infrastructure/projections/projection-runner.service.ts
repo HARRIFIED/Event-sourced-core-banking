@@ -11,6 +11,7 @@ import {
   TRANSFER_READ_MODEL_REPOSITORY,
   TransferReadModelRepository,
 } from '../../modules/transfers/query/transfer-read-model.repository';
+import { ProjectionCoordinationService } from './projection-coordination.service';
 
 @Injectable()
 export class ProjectionRunnerService implements OnModuleInit, OnModuleDestroy {
@@ -28,6 +29,7 @@ export class ProjectionRunnerService implements OnModuleInit, OnModuleDestroy {
     private readonly transferReadModels: TransferReadModelRepository,
     private readonly accountProjector: AccountProjector,
     private readonly transferProjector: TransferProjector,
+    private readonly projectionCoordination: ProjectionCoordinationService,
   ) {}
 
   onModuleInit(): void {
@@ -68,35 +70,41 @@ export class ProjectionRunnerService implements OnModuleInit, OnModuleDestroy {
   }
  // Additional helper methods for rebuilding specific account projections
   async rebuildAccount(accountId: string): Promise<void> {
-    const streamId = `account-${accountId}`;
-    await this.readModels.resetAccount(accountId);
-    const events = await this.eventStore.readStream(streamId);
+    await this.projectionCoordination.runExclusive(`account rebuild for ${accountId}`, async () => {
+      const streamId = `account-${accountId}`;
+      await this.readModels.resetAccount(accountId);
+      const events = await this.eventStore.readStream(streamId);
 
-    for (const event of events) {
-      await this.accountProjector.project(event);
-    }
+      for (const event of events) {
+        await this.accountProjector.project(event);
+      }
 
-    this.logger.log(`Projection rebuild completed for account ${accountId}`);
+      this.logger.log(`Projection rebuild completed for account ${accountId}`);
+    });
   }
   
   // Convenience method to rebuild all account projections from scratch
   async rebuildAll(): Promise<void> {
-    await this.readModels.resetAll();
-    await this.transferReadModels.resetAll();
-    await this.replayFrom(0);
-    this.logger.log('Full projection rebuild completed from event store');
+    await this.projectionCoordination.runExclusive('full projection rebuild', async () => {
+      await this.readModels.resetAll();
+      await this.transferReadModels.resetAll();
+      await this.replayFrom(0);
+      this.logger.log('Full projection rebuild completed from event store');
+    });
   }
 
   async rebuildTransfer(transferId: string): Promise<void> {
-    const streamId = `transfer-${transferId}`;
-    await this.transferReadModels.resetTransfer(transferId);
-    const events = await this.eventStore.readStream(streamId);
+    await this.projectionCoordination.runExclusive(`transfer rebuild for ${transferId}`, async () => {
+      const streamId = `transfer-${transferId}`;
+      await this.transferReadModels.resetTransfer(transferId);
+      const events = await this.eventStore.readStream(streamId);
 
-    for (const event of events) {
-      await this.transferProjector.project(event);
-    }
+      for (const event of events) {
+        await this.transferProjector.project(event);
+      }
 
-    this.logger.log(`Projection rebuild completed for transfer ${transferId}`);
+      this.logger.log(`Projection rebuild completed for transfer ${transferId}`);
+    });
   }
 
   private async runLoop(): Promise<void> {

@@ -5,6 +5,8 @@ import { ProjectionRunnerService } from '../infrastructure/projections/projectio
 
 async function main(): Promise<void> {
   const [, , scope, id] = process.argv;
+  process.env.PROJECTION_LIVE_CONSUMERS_ENABLED = 'false';
+
   const app = await NestFactory.createApplicationContext(AppModule, {
     logger: ['error', 'warn', 'log'],
   });

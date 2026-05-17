@@ -17,6 +17,7 @@ import { OutboxPublisherService } from './outbox/outbox-publisher.service';
 import { AccountEventsConsumerService } from './projections/account-events-consumer.service';
 import { TransferEventsConsumerService } from './projections/transfer-events-consumer.service';
 import { ProjectionAdminController } from './projections/projection-admin.controller';
+import { ProjectionCoordinationService } from './projections/projection-coordination.service';
 import { ProjectionRunnerService } from './projections/projection-runner.service';
 import { InMemorySnapshotStore } from './snapshots/in-memory-snapshot-store';
 import { PostgresSnapshotStore } from './snapshots/postgres-snapshot-store';
@@ -61,6 +62,7 @@ import { TRANSFER_READ_MODEL_REPOSITORY } from '../modules/transfers/query/trans
     OutboxPublisherService,
     AccountEventsConsumerService,
     TransferEventsConsumerService,
+    ProjectionCoordinationService,
     ProjectionRunnerService,
     {
       provide: IDEMPOTENCY_RECORD_REPOSITORY,
@@ -148,6 +150,7 @@ import { TRANSFER_READ_MODEL_REPOSITORY } from '../modules/transfers/query/trans
     },
   ],
   exports: [
+    ...databaseProviders,
     EVENT_STORE,
     OUTBOX_STORE,
     SNAPSHOT_STORE,
