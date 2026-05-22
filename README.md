@@ -378,6 +378,10 @@ Useful flags:
 - `--balance-weight=20`
 - `--history-weight=10`
 - `--create-weight=5`
+- `--transfer-initiate-weight=0`
+- `--transfer-status-weight=0`
+- `--max-transfer-amount=1500`
+- `--remove-completed-transfers-from-pool=false`
 
 Example heavier run:
 
@@ -385,11 +389,18 @@ Example heavier run:
 npm run load:test -- --duration=120 --workers=50 --accounts=250 --seed-concurrency=25 --initial-deposit=25000 --hot-account-ratio=0.05 --hot-selection-rate=0.9
 ```
 
+Example heavier 5-minute transfer-focused run:
+
+```bash
+npm run load:test -- --base-url=http://localhost:8080/api --duration=300 --workers=80 --accounts=400 --seed-concurrency=40 --initial-deposit=50000 --hot-account-ratio=0.03 --hot-selection-rate=0.92 --deposit-weight=20 --withdraw-weight=15 --balance-weight=10 --history-weight=5 --create-weight=2 --transfer-initiate-weight=30 --transfer-status-weight=18 --max-transfer-amount=3000
+```
+
 What to watch for:
 
 - `400` responses can be expected under aggressive withdrawal pressure because some requests will hit insufficient funds
 - `409` responses from deposits and withdrawals now indicate a genuine write conflict that exhausted all server-side retry attempts — this should be rare under normal load
 - `404` responses on balance or history reads can occur briefly after account creation because projections are asynchronous; they resolve quickly as the outbox publisher and Kafka consumer catch up
+- `404` responses on transfer status reads can occur briefly if a status poll arrives before the transfer projection catches up
 - `500` responses are unexpected and indicate a system fault worth investigating
 
 If you want a pure endpoint throughput benchmark as a separate experiment, you can also use `autocannon` externally against a single route, but the built-in script is the better fit for realistic account workflow stress.
@@ -525,6 +536,67 @@ Kafka broker values depend on where the app runs:
 - no read-your-own-write strategy yet for query-after-command UX
 - rebuild/admin endpoints are not authenticated yet
 - Kafka-based live projections still need broader operational hardening such as monitoring, lag visibility, and richer failure handling
+
+## Monitoring
+
+The repo now exposes Prometheus-compatible application metrics at:
+
+- `GET /metrics`
+
+Key app metrics include:
+
+- HTTP request rate, latency, and status codes
+- process memory and CPU usage
+- outbox publish throughput, failures, and backlog age
+- Kafka consumer throughput and failures
+- transfer debit, credit, and compensation stage throughput and latency
+
+The local Docker stack also includes:
+
+- Prometheus at `http://localhost:9090`
+- Grafana at `http://localhost:3001`
+- PostgreSQL exporter
+- Kafka exporter
+- cAdvisor
+
+Bring the full stack up with:
+
+```bash
+docker compose up -d
+```
+
+Prometheus can scrape either:
+
+- the Dockerized app, if you run the `app` service in Compose
+- a locally running app, if you run Nest outside Docker
+
+The scrape target is controlled through:
+
+- `PORT`
+- `PROMETHEUS_APP_TARGET`
+
+Examples:
+
+- app running locally on `8080`:
+  `PORT=8080`
+  `PROMETHEUS_APP_TARGET=host.docker.internal:8080`
+
+- app running in Docker on `3000`:
+  `PORT=3000`
+  `PROMETHEUS_APP_TARGET=host.docker.internal:3000`
+
+Useful URLs:
+
+- app metrics: `http://localhost:3000/metrics`
+- Prometheus: `http://localhost:9090`
+- Grafana: `http://localhost:3001`
+
+Default Grafana credentials:
+
+- username: `admin`
+- password: `admin`
+
+Grafana provisions the `Core Banking Overview` dashboard automatically from the repo.
 
 ## Next Steps
 1. Add richer operator tooling for stuck-transfer inspection and replay.

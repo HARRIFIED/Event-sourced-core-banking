@@ -4,6 +4,8 @@ import { Consumer } from 'kafkajs';
 import { DomainEvent } from '../../common/domain/domain-event';
 import { KafkaClient } from '../messaging/kafka.client';
 import { TransferProjector } from '../../modules/transfers/query/transfer-projector.service';
+import { ObservabilityService } from '../observability/observability.service';
+import { ProjectionCoordinationService } from './projection-coordination.service';
 
 @Injectable()
 export class TransferEventsConsumerService implements OnModuleInit, OnModuleDestroy {
@@ -14,11 +16,20 @@ export class TransferEventsConsumerService implements OnModuleInit, OnModuleDest
     private readonly kafkaClient: KafkaClient,
     private readonly transferProjector: TransferProjector,
     private readonly configService: ConfigService,
+    private readonly observability: ObservabilityService,
+    private readonly projectionCoordination: ProjectionCoordinationService,
   ) {}
 
   async onModuleInit(): Promise<void> {
     const storeKind = this.configService.get<string>('EVENT_STORE_KIND', 'in-memory');
     if (storeKind !== 'postgres') {
+      return;
+    }
+
+    const liveConsumersEnabled =
+      this.configService.get<string>('PROJECTION_LIVE_CONSUMERS_ENABLED', 'true') !== 'false';
+    if (!liveConsumersEnabled) {
+      this.logger.log('Kafka live projection consumer for transfer-events is disabled by configuration.');
       return;
     }
 
@@ -31,12 +42,31 @@ export class TransferEventsConsumerService implements OnModuleInit, OnModuleDest
     await this.consumer.subscribe({ topic: 'transfer-events', fromBeginning: true });
     await this.consumer.run({
       eachMessage: async ({ message }) => {
+        const startedAt = process.hrtime.bigint();
         if (!message.value) {
           return;
         }
 
-        const event = JSON.parse(message.value.toString()) as DomainEvent;
-        await this.transferProjector.project(event);
+        try {
+          const event = JSON.parse(message.value.toString()) as DomainEvent;
+          await this.projectionCoordination.runShared(() => this.transferProjector.project(event));
+          const durationSeconds = Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
+          this.observability.recordKafkaMessage(
+            TransferEventsConsumerService.name,
+            'transfer-events',
+            'success',
+            durationSeconds,
+          );
+        } catch (error) {
+          const durationSeconds = Number(process.hrtime.bigint() - startedAt) / 1_000_000_000;
+          this.observability.recordKafkaMessage(
+            TransferEventsConsumerService.name,
+            'transfer-events',
+            'failure',
+            durationSeconds,
+          );
+          throw error;
+        }
       },
     });
 

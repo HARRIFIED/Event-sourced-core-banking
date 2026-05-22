@@ -16,7 +16,7 @@ export class KafkaClient implements OnModuleInit, OnModuleDestroy {
       clientId: this.configService.get<string>('KAFKA_CLIENT_ID', 'core-banking-app'),
       brokers: this.brokers,
     });
-    this.producer = this.kafka.producer();
+    this.producer = this.kafka.producer();                  
   }
 
   async onModuleInit(): Promise<void> {

@@ -22,6 +22,7 @@ import { CommandContext } from '../../../../common/cqrs/command-context';
 import { Inject } from '@nestjs/common';
 import { minorUnitsToNumber } from '../../../../common/money/money';
 import { TransferStatus } from '../../domain/transfer-status.enum';
+import { ObservabilityService } from '../../../../infrastructure/observability/observability.service';
 
 const POLL_INTERVAL_MS = 200;
 
@@ -35,6 +36,7 @@ export class TransferCoordinatorService implements OnModuleInit, OnModuleDestroy
     private readonly commandBus: CommandBus,
     private readonly transferRepository: TransferRepository,
     private readonly transactionRegistry: TransactionRegistryService,
+    private readonly observability: ObservabilityService,
     @Inject(TRANSFER_READ_MODEL_REPOSITORY)
     private readonly transfers: TransferReadModelRepository,
   ) {}
@@ -115,6 +117,7 @@ export class TransferCoordinatorService implements OnModuleInit, OnModuleDestroy
   }
 
   private async processDebit(transferId: string, context: CommandContext, transactionId: string): Promise<void> {
+    const startedAt = process.hrtime.bigint();
     const transfer = await this.transferRepository.getById(transferId);
     if (transfer.status === TransferStatus.INITIATED || transfer.status === TransferStatus.DEBIT_IN_PROGRESS) {
       await this.commandBus.execute(new StartDebitTransferCommand(transferId, transactionId, context));
@@ -148,6 +151,11 @@ export class TransferCoordinatorService implements OnModuleInit, OnModuleDestroy
         },
       );
       await this.commandBus.execute(new MarkTransferDebitedCommand(transferId, context));
+      this.observability.recordTransferStage(
+        'debit',
+        'success',
+        Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
+      );
     } catch (error) {
       if (this.isTerminalDomainError(error)) {
         await this.commandBus.execute(
@@ -158,9 +166,20 @@ export class TransferCoordinatorService implements OnModuleInit, OnModuleDestroy
             context,
           ),
         );
+        this.observability.recordTransferOutcome('FAILED');
+        this.observability.recordTransferStage(
+          'debit',
+          'failure',
+          Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
+        );
         return;
       }
 
+      this.observability.recordTransferStage(
+        'debit',
+        'failure',
+        Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
+      );
       throw new RetryableTransferProcessingError(
         error instanceof Error ? error.message : String(error),
       );
@@ -168,6 +187,7 @@ export class TransferCoordinatorService implements OnModuleInit, OnModuleDestroy
   }
 
   private async processCredit(transferId: string, context: CommandContext, transactionId: string): Promise<void> {
+    const startedAt = process.hrtime.bigint();
     const transfer = await this.transferRepository.getById(transferId);
     if (transfer.status === TransferStatus.DEBITED || transfer.status === TransferStatus.CREDIT_IN_PROGRESS) {
       await this.commandBus.execute(new StartCreditTransferCommand(transferId, transactionId, context));
@@ -201,6 +221,12 @@ export class TransferCoordinatorService implements OnModuleInit, OnModuleDestroy
         },
       );
       await this.commandBus.execute(new CompleteTransferCommand(transferId, context));
+      this.observability.recordTransferOutcome('COMPLETED');
+      this.observability.recordTransferStage(
+        'credit',
+        'success',
+        Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
+      );
     } catch (error) {
       if (this.isTerminalDomainError(error)) {
         await this.commandBus.execute(
@@ -211,9 +237,20 @@ export class TransferCoordinatorService implements OnModuleInit, OnModuleDestroy
             context,
           ),
         );
+        this.observability.recordTransferOutcome('FAILED');
+        this.observability.recordTransferStage(
+          'credit',
+          'failure',
+          Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
+        );
         return;
       }
 
+      this.observability.recordTransferStage(
+        'credit',
+        'failure',
+        Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
+      );
       throw new RetryableTransferProcessingError(
         error instanceof Error ? error.message : String(error),
       );
@@ -221,6 +258,7 @@ export class TransferCoordinatorService implements OnModuleInit, OnModuleDestroy
   }
 
   private async processCompensation(transferId: string, context: CommandContext, transactionId: string): Promise<void> {
+    const startedAt = process.hrtime.bigint();
     const transfer = await this.transferRepository.getById(transferId);
     if (transfer.status === TransferStatus.FAILED || transfer.status === TransferStatus.COMPENSATION_IN_PROGRESS) {
       await this.commandBus.execute(new StartTransferCompensationCommand(transferId, transactionId, context));
@@ -254,7 +292,18 @@ export class TransferCoordinatorService implements OnModuleInit, OnModuleDestroy
         },
       );
       await this.commandBus.execute(new CompleteTransferCompensationCommand(transferId, context));
+      this.observability.recordTransferOutcome('COMPENSATED');
+      this.observability.recordTransferStage(
+        'compensation',
+        'success',
+        Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
+      );
     } catch (error) {
+      this.observability.recordTransferStage(
+        'compensation',
+        'failure',
+        Number(process.hrtime.bigint() - startedAt) / 1_000_000_000,
+      );
       throw new RetryableTransferProcessingError(
         error instanceof Error ? error.message : String(error),
       );

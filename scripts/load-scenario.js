@@ -228,6 +228,17 @@ function makeAccount(config, sequence) {
   };
 }
 
+function makeTransfer(config, sequence, sourceAccountId, destinationAccountId, amount) {
+  return {
+    transferId: `${config.accountPrefix}-trf-${sequence}`,
+    sourceAccountId,
+    destinationAccountId,
+    currency: config.currency,
+    amount,
+    status: 'accepted',
+  };
+}
+
 function pickAccount(config, options = {}) {
   const activeAccounts = config.accounts.filter((account) => !account.frozen);
   if (activeAccounts.length === 0) {
@@ -243,6 +254,29 @@ function pickAccount(config, options = {}) {
   const selectionPool = shouldUseHotPool ? pool.slice(0, hotCount) : pool;
 
   return selectionPool[randomBetween(0, selectionPool.length - 1)];
+}
+
+function pickDistinctAccountPair(config, minimumBalance = 0) {
+  const source = pickAccount(config, { minimumBalance });
+  if (!source) {
+    return null;
+  }
+
+  const destinationCandidates = config.accounts.filter(
+    (account) => !account.frozen && account.accountId !== source.accountId,
+  );
+  if (destinationCandidates.length === 0) {
+    return null;
+  }
+
+  const hotCount = Math.max(1, Math.floor(destinationCandidates.length * config.hotAccountRatio));
+  const shouldUseHotPool = destinationCandidates.length > 1 && Math.random() < config.hotSelectionRate;
+  const selectionPool = shouldUseHotPool
+    ? destinationCandidates.slice(0, hotCount)
+    : destinationCandidates;
+  const destination = selectionPool[randomBetween(0, selectionPool.length - 1)];
+
+  return { source, destination };
 }
 
 async function createAccount(config, account, initialDeposit, operationName = 'createAccount') {
@@ -361,6 +395,63 @@ async function runCreateAccount(config) {
   await createAccount(config, account, config.initialDeposit, 'createAccount');
 }
 
+async function runInitiateTransfer(config) {
+  const pair = pickDistinctAccountPair(config, config.minAmount);
+  if (!pair) {
+    return runCreateAccount(config);
+  }
+
+  const maxTransferAmount = Math.max(
+    config.minAmount,
+    Math.min(config.maxTransferAmount, Math.floor(pair.source.balance)),
+  );
+  const amount = randomBetween(config.minAmount, maxTransferAmount);
+  const transfer = makeTransfer(
+    config,
+    config.nextTransferSequence++,
+    pair.source.accountId,
+    pair.destination.accountId,
+    amount,
+  );
+
+  const response = await httpRequest(config, 'initiateTransfer', '/transfers', {
+    method: 'POST',
+    headers: {
+      'Idempotency-Key': randomUUID(),
+    },
+    body: {
+      transferId: transfer.transferId,
+      sourceAccountId: transfer.sourceAccountId,
+      destinationAccountId: transfer.destinationAccountId,
+      amount,
+      currency: transfer.currency,
+    },
+  });
+
+  if (response.ok) {
+    config.transfers.push(transfer);
+  }
+}
+
+async function runTransferStatusRead(config) {
+  if (config.transfers.length === 0) {
+    return runInitiateTransfer(config);
+  }
+
+  const transfer = config.transfers[randomBetween(0, config.transfers.length - 1)];
+  const response = await httpRequest(config, 'getTransferStatus', `/transfers/${transfer.transferId}`);
+  if (response.ok && response.body && typeof response.body === 'object') {
+    transfer.status = response.body.status ?? transfer.status;
+    if (config.removeCompletedTransfersFromPool && isTransferTerminal(transfer.status)) {
+      config.transfers = config.transfers.filter((candidate) => candidate.transferId !== transfer.transferId);
+    }
+  }
+}
+
+function isTransferTerminal(status) {
+  return ['COMPLETED', 'FAILED', 'COMPENSATED'].includes(status);
+}
+
 async function runWorker(config, deadline) {
   while (Date.now() < deadline) {
     const operation = weightedPick(config.operationWeights);
@@ -380,6 +471,12 @@ async function runWorker(config, deadline) {
         break;
       case 'history':
         await runHistoryRead(config);
+        break;
+      case 'transferInitiate':
+        await runInitiateTransfer(config);
+        break;
+      case 'transferStatus':
+        await runTransferStatusRead(config);
         break;
       default:
         await runBalanceRead(config);
@@ -443,11 +540,16 @@ async function main() {
     historyLimit: readNumber(args, 'history-limit', 20),
     hotAccountRatio: readNumber(args, 'hot-account-ratio', 0.1),
     hotSelectionRate: readNumber(args, 'hot-selection-rate', 0.8),
+    maxTransferAmount: readNumber(args, 'max-transfer-amount', readNumber(args, 'max-amount', 1500)),
     healthRetries: readNumber(args, 'health-retries', 10),
     healthRetryDelayMs: readNumber(args, 'health-retry-delay-ms', 1500),
+    removeCompletedTransfersFromPool:
+      readString(args, 'remove-completed-transfers-from-pool', 'false') === 'true',
     accountPrefix: `load-${Date.now()}`,
     nextAccountSequence: 1,
+    nextTransferSequence: 1,
     accounts: [],
+    transfers: [],
     metrics: new Metrics(),
     operationWeights: [
       { name: 'deposit', weight: readNumber(args, 'deposit-weight', 35) },
@@ -455,6 +557,8 @@ async function main() {
       { name: 'balance', weight: readNumber(args, 'balance-weight', 20) },
       { name: 'history', weight: readNumber(args, 'history-weight', 10) },
       { name: 'create', weight: readNumber(args, 'create-weight', 5) },
+      { name: 'transferInitiate', weight: readNumber(args, 'transfer-initiate-weight', 0) },
+      { name: 'transferStatus', weight: readNumber(args, 'transfer-status-weight', 0) },
     ],
   };
 
@@ -465,7 +569,9 @@ async function main() {
   console.log(`Running workload for ${durationSeconds}s with ${config.workers} workers...`);
   console.log(
     `Mix: deposit=${config.operationWeights[0].weight}, withdraw=${config.operationWeights[1].weight}, ` +
-      `balance=${config.operationWeights[2].weight}, history=${config.operationWeights[3].weight}, create=${config.operationWeights[4].weight}`,
+      `balance=${config.operationWeights[2].weight}, history=${config.operationWeights[3].weight}, ` +
+      `create=${config.operationWeights[4].weight}, transferInitiate=${config.operationWeights[5].weight}, ` +
+      `transferStatus=${config.operationWeights[6].weight}`,
   );
   console.log(
     `Hot account pressure: ${Math.round(config.hotSelectionRate * 100)}% of requests target the top ` +
@@ -479,6 +585,7 @@ async function main() {
   console.log('');
   console.log('Notes:');
   console.log('- Reads come from projections, so balance/history may briefly lag behind accepted writes.');
+  console.log('- Transfer status reads also hit eventually-consistent projections and can briefly lag after initiation.');
   console.log('- Repeated 400s usually mean insufficient funds or frozen/currency-invalid account requests.');
   console.log('- Repeated 500s with WrongExpectedVersion suggest write contention worth hardening.');
 }
